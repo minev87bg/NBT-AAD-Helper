@@ -55,10 +55,17 @@ class UpdateLogicTest {
 
     @Test
     fun releaseNotesAreShortAndWithoutGitTrailers() {
-        val body = "Updater in the app\n\nSecond line\nCo-Authored-By: Someone <a@b.c>\nClaude-Session: https://x\n" +
-            "third\nfourth\nfifth"
-        assertEquals("Updater in the app\nSecond line\nthird\nfourth\n…", UpdateLogic.shortNotes(body))
+        val body = "Updater in the app\n\nSecond paragraph that was\nwrapped by git\n\n" +
+            "Co-Authored-By: Someone <a@b.c>\nClaude-Session: https://x\n"
+        assertEquals("Updater in the app\nSecond paragraph that was wrapped by git", UpdateLogic.shortNotes(body))
         assertEquals("one", UpdateLogic.shortNotes("one"))
         assertEquals("", UpdateLogic.shortNotes(null))
+    }
+
+    @Test
+    fun bulletsStayApartAndLongNotesAreCut() {
+        val body = "Title\n\n- one that is\n  wrapped\n- two\n\nclosing line"
+        assertEquals("Title\n- one that is wrapped\n- two\nclosing line", UpdateLogic.shortNotes(body))
+        assertEquals("a\nb\nc\nd\ne\n…", UpdateLogic.shortNotes("a\n\nb\n\nc\n\nd\n\ne\n\nf"))
     }
 }

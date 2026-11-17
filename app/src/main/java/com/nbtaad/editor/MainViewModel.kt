@@ -141,6 +141,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         checkUpdate()
     }
 
+    /** "Updated to version X." for 15 minutes after Android replaced this app with a newer version, else empty. */
+    val updatedNote: String = try {
+        val me = Updater.installed(ctx)
+        if (me.justUpdated) "Updated to version ${me.name}." else ""
+    } catch (e: Exception) {
+        ""
+    }
+
     /** The version this app was built as (1.0.N from a GitHub build, "dev" from a local one). */
     val appVersion: String by lazy { try { Updater.installed(ctx).name } catch (e: Exception) { "?" } }
 
@@ -204,7 +212,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         "updates then work in place."
                     return@launch
                 }
-                updateMessage = "Confirm the installation on the next screen."
+                updateMessage = "Confirm the installation on the next screen. The app closes while it updates: " +
+                    "open it again afterwards."
                 Updater.install(ctx, apk)
                 updatePhase = UpdatePhase.AVAILABLE
             } catch (e: Exception) {

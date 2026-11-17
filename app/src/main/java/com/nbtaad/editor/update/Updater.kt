@@ -20,8 +20,8 @@ import java.io.IOException
 import java.net.URL
 import java.security.MessageDigest
 
-/** What the app is now: the version it was built as. */
-data class Installed(val code: Long, val name: String)
+/** What the app is now: the version it was built as, and whether it was replaced by a newer one a moment ago. */
+data class Installed(val code: Long, val name: String, val justUpdated: Boolean = false)
 
 sealed class Check {
     data class Newer(val offer: UpdateOffer) : Check()
@@ -36,12 +36,16 @@ object InstallEvents {
 object Updater {
     private const val ACTION = "com.nbtaad.editor.INSTALL_RESULT"
     private const val MAX_APK = 120L * 1024 * 1024
+    private const val JUST_UPDATED_MS = 15L * 60 * 1000
 
     fun installed(ctx: Context): Installed {
         val info = ctx.packageManager.getPackageInfo(ctx.packageName, 0)
         @Suppress("DEPRECATION")
         val code = if (Build.VERSION.SDK_INT >= 28) info.longVersionCode else info.versionCode.toLong()
-        return Installed(code, info.versionName ?: "?")
+        // an update keeps the first install time and moves the last update time; a fresh install has both equal
+        val replaced = info.lastUpdateTime - info.firstInstallTime > 1000
+        val ago = System.currentTimeMillis() - info.lastUpdateTime
+        return Installed(code, info.versionName ?: "?", replaced && ago in 0..JUST_UPDATED_MS)
     }
 
     /** Asks GitHub for the newest release. Throws when there is no internet or GitHub does not answer. */

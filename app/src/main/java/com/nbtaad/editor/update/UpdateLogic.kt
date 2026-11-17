@@ -45,13 +45,25 @@ object UpdateLogic {
 
     fun sha256Hex(bytes: ByteArray): String = hex(MessageDigest.getInstance("SHA-256").digest(bytes))
 
-    /** The release notes without the blank lines and git trailers, at most [maxLines] lines. */
-    fun shortNotes(body: String?, maxLines: Int = 4): String {
-        val lines = (body ?: "").lines()
-            .map { it.trim() }
-            .filter { it.isNotEmpty() && !it.startsWith("Co-Authored-By:", true) && !it.startsWith("Claude-Session:", true) }
-        val cut = lines.take(maxLines).joinToString("\n")
-        return if (lines.size > maxLines) "$cut\n…" else cut
+    /**
+     * The release notes for the update banner: git trailers dropped, the commit message's hard line breaks joined
+     * into paragraphs (a "- " line starts a new item), at most [maxItems] paragraphs / items.
+     */
+    fun shortNotes(body: String?, maxItems: Int = 5): String {
+        val items = ArrayList<String>()
+        var open = false   // the last item may continue on the next line
+        for (raw in (body ?: "").lines()) {
+            val line = raw.trim()
+            if (line.isEmpty() || line.startsWith("Co-Authored-By:", true) || line.startsWith("Claude-Session:", true)) {
+                open = false
+                continue
+            }
+            val bullet = line.startsWith("- ") || line.startsWith("* ")
+            if (open && !bullet) items[items.size - 1] = items.last() + " " + line else items.add(line)
+            open = true
+        }
+        val cut = items.take(maxItems).joinToString("\n")
+        return if (items.size > maxItems) "$cut\n…" else cut
     }
 
     /** Is the downloaded file what the release announced? [sha256] is only known when GitHub provides it. */

@@ -176,7 +176,8 @@ private fun UpdateBanner(vm: MainViewModel) {
     val offer = vm.updateOffer
     val installNote = vm.installMessage
     val msg = installNote ?: vm.updateMessage
-    if (msg.isBlank() && offer == null) return
+    val updated = vm.updatedNote
+    if (msg.isBlank() && offer == null && updated.isBlank()) return
     val busy = vm.updatePhase == UpdatePhase.DOWNLOADING
     val color = when {
         installNote != null || vm.updatePhase == UpdatePhase.FAILED -> Amber
@@ -184,6 +185,16 @@ private fun UpdateBanner(vm: MainViewModel) {
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
     Spacer(Modifier.height(6.dp))
+    if (updated.isNotBlank()) {
+        // shown for a few minutes after the app was replaced by a newer version: the update worked
+        Text(
+            updated,
+            fontSize = 13.sp,
+            color = MaterialTheme.colorScheme.primary,
+            fontWeight = FontWeight.SemiBold,
+            textAlign = TextAlign.Center,
+        )
+    }
     Text(
         msg,
         fontSize = 12.sp,
@@ -202,13 +213,19 @@ private fun UpdateBanner(vm: MainViewModel) {
             Text(
                 offer.notes,
                 fontSize = 11.sp,
-                maxLines = 4,
+                maxLines = 7,
                 overflow = TextOverflow.Ellipsis,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.padding(top = 2.dp),
             )
         }
+        Text(
+            "While it updates, the app closes. Open it again afterwards, the new version is then ready.",
+            fontSize = 12.sp,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(top = 6.dp),
+        )
         Button(onClick = { vm.startUpdate() }, modifier = Modifier.padding(top = 4.dp)) { Text("UPDATE") }
     }
 }

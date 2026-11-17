@@ -16,7 +16,8 @@ You can also open the folder in Android Studio (Ladybug or newer) and use Build 
 At start-up the app asks GitHub for the latest release. When it is newer than the installed one, the first screen shows
 "New version available", the release notes and an UPDATE button. UPDATE downloads the APK, checks its size, its
 checksum and that it is signed with the same key as the installed app, and hands it to Android's installer, which asks
-for one confirmation (Android does not allow an app to install itself silently). The first time, Android also asks
+for one confirmation (Android does not allow an app to install itself silently). The app closes while it is replaced:
+the banner says so, and after opening it again the first screen says "Updated to version X". The first time, Android also asks
 to allow "install unknown apps" for this app.
 
 How it fits together: the build number is the GitHub run number (version `1.0.N`, versionCode `N`), the workflow
