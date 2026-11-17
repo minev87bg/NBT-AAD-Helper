@@ -122,6 +122,13 @@ private fun DetectScreen(vm: MainViewModel) {
             modifier = Modifier.align(Alignment.BottomStart),
         ) { Text("manual IPs", fontSize = 12.sp) }
 
+        Text(
+            "v${vm.appVersion}",
+            fontSize = 11.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.align(Alignment.BottomEnd).padding(end = 6.dp, bottom = 16.dp),
+        )
+
         if (canNext) {
             Button(
                 onClick = { vm.onNext() },

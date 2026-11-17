@@ -141,6 +141,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         checkUpdate()
     }
 
+    /** The version this app was built as (1.0.N from a GitHub build, "dev" from a local one). */
+    val appVersion: String by lazy { try { Updater.installed(ctx).name } catch (e: Exception) { "?" } }
+
     /** What the system installer answered after the file was handed over (cancelled, refused, done). */
     val installMessage: String? get() = InstallEvents.message
 
