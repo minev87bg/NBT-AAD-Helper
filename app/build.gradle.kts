@@ -42,4 +42,7 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     // maintained JSch fork: still supports the old ssh-dss / ssh-rsa / hmac-sha1 the head unit needs
     implementation("com.github.mwiede:jsch:0.2.21")
+
+    // plain JVM tests of the settings parser (run by the GitHub build)
+    testImplementation("junit:junit:4.13.2")
 }

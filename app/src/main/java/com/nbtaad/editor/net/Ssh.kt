@@ -166,9 +166,13 @@ object EnvRemote {
 
             progress("Replacing $FILE…")
             // The head unit's shell has no "sync" command, so none is used; the read-back below proves the write.
-            // Backups next to the file: .orig is made once (the oldest copy), .bak is the previous version.
+            // Backups next to the file: .orig is made once (the oldest copy), then .bak is the previous version,
+            // .bak2 the one before and .bak3 the one before that, so one more save never destroys the last good copy.
             r = ssh.exec(
-                "if [ -f $path ]; then [ -f $path.orig ] || cp $path $path.orig; cp $path $path.bak; fi; " +
+                "if [ -f $path ]; then [ -f $path.orig ] || cp $path $path.orig; " +
+                    "[ -f $path.bak2 ] && cp $path.bak2 $path.bak3; " +
+                    "[ -f $path.bak ] && cp $path.bak $path.bak2; " +
+                    "cp $path $path.bak; fi; " +
                     "mv $path.new $path"
             )
             if (r.exit != 0) throw IOException("Could not replace the file: ${r.err.trim().ifEmpty { "exit ${r.exit}" }}")

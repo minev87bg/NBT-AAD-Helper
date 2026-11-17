@@ -10,7 +10,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -19,24 +18,24 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import com.nbtaad.editor.data.ThemeMode
+import com.nbtaad.editor.env.EnvCheck
 import com.nbtaad.editor.env.Opt
 
 private val Green = Color(0xFF2E7D32)
 private val Red = Color(0xFFC62828)
+private val Amber = Color(0xFFC77700)
 
 @Composable
 fun App(vm: MainViewModel) {
@@ -45,12 +44,8 @@ fun App(vm: MainViewModel) {
             when (vm.screen) {
                 Screen.DETECT -> DetectScreen(vm)
                 Screen.OPTIONS -> OptionsScreen(vm)
-                Screen.MANUAL -> ManualScreen(vm)
             }
-            // the text editor uses the whole top row for its own buttons
-            if (vm.screen != Screen.MANUAL) {
-                ThemeToggle(vm, Modifier.align(Alignment.TopEnd).padding(4.dp))
-            }
+            ThemeToggle(vm, Modifier.align(Alignment.TopEnd).padding(4.dp))
         }
     }
 }
@@ -102,6 +97,23 @@ private fun DetectScreen(vm: MainViewModel) {
                 st, vm,
                 Modifier.align(Alignment.TopCenter).offset(y = h * 0.64f).fillMaxWidth(0.92f),
             )
+        }
+
+        // is the list of settings up to date? (needs internet once; afterwards it is kept on the phone)
+        Column(
+            Modifier.align(Alignment.TopCenter).padding(top = 40.dp).fillMaxWidth(0.92f),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                vm.syncMessage,
+                fontSize = 12.sp,
+                color = if (vm.syncOk) Green else MaterialTheme.colorScheme.onSurfaceVariant,
+                fontWeight = if (vm.syncOk) FontWeight.SemiBold else FontWeight.Normal,
+                textAlign = TextAlign.Center,
+            )
+            if (!vm.syncBusy && !vm.syncOk) {
+                TextButton(onClick = { vm.syncCatalog() }) { Text("check again", fontSize = 12.sp) }
+            }
         }
 
         TextButton(
@@ -220,62 +232,98 @@ private fun OptionsScreen(vm: MainViewModel) {
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val h = maxHeight
+        val visible = vm.visibleRows()
+        val changeCount = vm.changes.size
         Column(
             Modifier.fillMaxSize().padding(horizontal = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Spacer(Modifier.height(h * 0.2f))
-            Button(onClick = { vm.onReadClick() }, enabled = !vm.optBusy) { Text("READ OPTIONS") }
-            Text(
-                vm.optFeedback,
-                fontSize = 12.sp,
-                color = if (vm.optError) Red else Color.Unspecified,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.padding(vertical = 8.dp),
-            )
-            val fileRows = vm.rows.filter { it.inFile }
-            val extraRows = vm.rows.filterNot { it.inFile }
             LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
-                items(fileRows, key = { it.key }) { opt ->
-                    OptionRow(opt, vm.values[opt.key], vm.isChanged(opt.key), vm.orig[opt.key], { vm.undo(opt.key) }) {
-                        vm.edit(opt.key, it)
-                    }
-                    HorizontalDivider()
-                }
-                if (extraRows.isNotEmpty()) {
-                    item(key = "__extra_header") {
+                item(key = "__top") {
+                    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Spacer(Modifier.height(h * 0.2f))
+                        Button(onClick = { vm.onReadClick() }, enabled = !vm.optBusy) { Text("READ OPTIONS") }
                         Text(
-                            "Other known options (not in your file)",
+                            vm.optFeedback,
                             fontSize = 12.sp,
-                            color = Color.Gray,
-                            modifier = Modifier.padding(top = 20.dp, bottom = 4.dp),
+                            color = if (vm.optError) Red else Color.Unspecified,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(vertical = 8.dp),
                         )
-                    }
-                    items(extraRows, key = { it.key }) { opt ->
-                        OptionRow(opt, vm.values[opt.key], vm.isChanged(opt.key), vm.orig[opt.key], { vm.undo(opt.key) }) {
-                            vm.edit(opt.key, it)
+                        val used = vm.settingCount
+                        Text(
+                            "Settings switched on: $used of ${EnvCheck.MAX_SETTINGS} the daemon can use",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (used > EnvCheck.MAX_SETTINGS) Red else Color.Unspecified,
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = vm.search,
+                            onValueChange = { vm.search = it },
+                            singleLine = true,
+                            textStyle = TextStyle(fontSize = 14.sp),
+                            placeholder = { Text("Search settings") },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Row(
+                            Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            FilterChip(
+                                selected = vm.onlyActive,
+                                onClick = { vm.onlyActive = !vm.onlyActive },
+                                label = { Text("Applied or changed only", fontSize = 12.sp) },
+                            )
+                            Spacer(Modifier.weight(1f))
+                            Text("${visible.size} of ${vm.rows.size}", fontSize = 12.sp, color = Color.Gray)
                         }
+                    }
+                }
+                if (visible.isEmpty()) {
+                    item(key = "__none") {
+                        Text("No setting matches.", fontSize = 13.sp, modifier = Modifier.padding(vertical = 24.dp))
+                    }
+                }
+                var lastGroup: String? = null
+                for (opt in visible) {
+                    if (opt.group != lastGroup) {
+                        lastGroup = opt.group
+                        val g = opt.group
+                        item(key = "__group_$g") {
+                            Text(
+                                "$g (${visible.count { it.group == g }})",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(top = 18.dp, bottom = 4.dp),
+                            )
+                        }
+                    }
+                    item(key = opt.key) {
+                        OptionRow(
+                            opt, vm.values[opt.key], vm.isApplied(opt.key), vm.isChanged(opt.key), vm.orig[opt.key],
+                            { vm.undo(opt.key) },
+                        ) { vm.edit(opt.key, it) }
                         HorizontalDivider()
                     }
                 }
-                if (vm.rows.isNotEmpty()) {
-                    item(key = "__save") {
-                        Button(
-                            onClick = { vm.requestSave() },
-                            enabled = vm.saveDialog == null,
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
-                        ) { Text("SAVE") }
-                    }
-                }
+            }
+            Button(
+                onClick = { vm.requestSave() },
+                enabled = vm.fileKnown && vm.saveDialog == null,
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = if (vm.fileKnown) 8.dp else 2.dp),
+            ) { Text(if (changeCount > 0) "SAVE ($changeCount change${if (changeCount == 1) "" else "s"})" else "SAVE") }
+            if (!vm.fileKnown) {
+                Text(
+                    "SAVE unlocks after READ OPTIONS, so the settings already on the head unit are not overwritten.",
+                    fontSize = 11.sp,
+                    color = Color.Gray,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(bottom = 8.dp),
+                )
             }
         }
-
-        // opens the raw file in the in-app text editor
-        TextButton(
-            onClick = { vm.openManual() },
-            enabled = !vm.optBusy && vm.saveDialog == null,
-            modifier = Modifier.align(Alignment.TopStart).padding(4.dp),
-        ) { Text("manual edit", fontSize = 12.sp) }
     }
 
     if (vm.confirmRead) {
@@ -285,7 +333,7 @@ private fun OptionsScreen(vm: MainViewModel) {
             title = { Text("Unsaved changes") },
             text = {
                 Text(
-                    "$n option${if (n == 1) " is" else "s are"} changed and not saved. Reading the file from the " +
+                    "$n setting${if (n == 1) " is" else "s are"} changed and not saved. Reading the file from the " +
                         "head unit again will throw those changes away."
                 )
             },
@@ -299,99 +347,37 @@ private fun OptionsScreen(vm: MainViewModel) {
     vm.saveDialog?.let { SaveDialog(vm, it) }
 }
 
-// =========================================================================
-// Manual edit: the raw nbt-aad.env in a plain text editor
-// =========================================================================
-
 @Composable
-private fun ManualScreen(vm: MainViewModel) {
-    BackHandler { vm.closeManual() }
-    val clipboard = LocalClipboardManager.current
-    var copied by remember { mutableStateOf(false) }
-    LaunchedEffect(vm.manualText) { copied = false }
-
-    Column(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = { vm.closeManual() }) { Text("Close", fontSize = 12.sp) }
-            Spacer(Modifier.weight(1f))
-            TextButton(
-                onClick = {
-                    clipboard.setText(AnnotatedString(vm.manualText))
-                    copied = true
-                },
-                enabled = vm.manualText.isNotEmpty(),
-            ) { Text(if (copied) "Copied" else "Copy all", fontSize = 12.sp) }
-        }
-        Text("Manual edit: nbt-aad.env", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
-        Text(
-            vm.manualMsg,
-            fontSize = 12.sp,
-            color = if (vm.manualError) Red else Color.Unspecified,
-            maxLines = 6,
-            modifier = Modifier.padding(vertical = 4.dp),
-        )
-        if (vm.manualBusy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(bottom = 6.dp))
-
-        OutlinedTextField(
-            value = vm.manualText,
-            onValueChange = { vm.manualText = it },
-            enabled = !vm.manualBusy,
-            textStyle = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 12.sp),
-            keyboardOptions = KeyboardOptions(
-                capitalization = KeyboardCapitalization.None,
-                autoCorrectEnabled = false,
-            ),
-            placeholder = { Text("(empty)") },
-            modifier = Modifier.weight(1f).fillMaxWidth(),
-        )
-        val lines = vm.manualText.count { it == '\n' } + 1
-        Text(
-            "$lines lines, ${vm.manualText.length} characters" +
-                if (vm.manualDirty) ", edited" else "",
-            fontSize = 11.sp,
-            color = Color.Gray,
-            modifier = Modifier.padding(top = 4.dp),
-        )
-        Button(
-            onClick = { vm.applyManual() },
-            enabled = !vm.manualBusy && !vm.manualError,
-            modifier = Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 8.dp),
-        ) { Text("SAVE") }
-        Text(
-            "SAVE puts this text into the options list, with every changed option marked. " +
-                "Nothing is sent to the car until you press SAVE there.",
-            fontSize = 11.sp,
-            color = Color.Gray,
-            modifier = Modifier.padding(bottom = 8.dp),
-        )
-    }
-
-    if (vm.confirmCloseManual) {
-        AlertDialog(
-            onDismissRequest = { vm.confirmCloseManual = false },
-            title = { Text("Discard your edits?") },
-            text = { Text("The text was changed but not saved. Closing the editor throws those edits away.") },
-            confirmButton = { TextButton(onClick = { vm.discardManual() }) { Text("Discard") } },
-            dismissButton = { TextButton(onClick = { vm.confirmCloseManual = false }) { Text("Keep editing") } },
-        )
-    }
-}
-
-@Composable
-private fun ReviewDialog(vm: MainViewModel, changes: List<Change>) {
+private fun ReviewDialog(vm: MainViewModel, r: ReviewState) {
+    val blocked = r.errors.isNotEmpty()
     AlertDialog(
         onDismissRequest = { vm.review = null },
-        title = { Text(if (changes.isEmpty()) "No changes" else "Review changes (${changes.size})") },
+        title = {
+            Text(
+                when {
+                    blocked -> "This file cannot be uploaded"
+                    r.changes.isEmpty() -> "No changes"
+                    else -> "Review changes (${r.changes.size})"
+                },
+                color = if (blocked) Red else Color.Unspecified,
+            )
+        },
         text = {
             Column(Modifier.heightIn(max = 380.dp).verticalScroll(rememberScrollState())) {
-                if (changes.isEmpty()) {
+                r.errors.forEach {
+                    Text(it, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Red, modifier = Modifier.padding(vertical = 4.dp))
+                }
+                r.warnings.forEach {
+                    Text(it, fontSize = 12.sp, color = Amber, modifier = Modifier.padding(vertical = 4.dp))
+                }
+                if (r.changes.isEmpty() && !blocked) {
                     Text(
-                        "No option value differs from the file on the car (comments or other lines may still " +
+                        "No setting differs from the file on the car (comments or other lines may still " +
                             "differ). Upload it anyway?",
                         fontSize = 13.sp,
                     )
                 }
-                changes.forEach { c ->
+                r.changes.forEach { c ->
                     Column(Modifier.padding(vertical = 6.dp)) {
                         Text(c.key, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
                         Text("was:  ${c.old ?: "(not set)"}", fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = Red)
@@ -399,12 +385,20 @@ private fun ReviewDialog(vm: MainViewModel, changes: List<Change>) {
                     }
                     HorizontalDivider()
                 }
+                Text(
+                    "Settings switched on after this upload: ${r.settingCount} of ${EnvCheck.MAX_SETTINGS}",
+                    fontSize = 12.sp,
+                    color = Color.Gray,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
             }
         },
         confirmButton = {
-            TextButton(onClick = { vm.confirmSave() }) { Text(if (changes.isEmpty()) "Upload anyway" else "Upload") }
+            if (!blocked) {
+                TextButton(onClick = { vm.confirmSave() }) { Text(if (r.changes.isEmpty()) "Upload anyway" else "Upload") }
+            }
         },
-        dismissButton = { TextButton(onClick = { vm.review = null }) { Text("Cancel") } },
+        dismissButton = { TextButton(onClick = { vm.review = null }) { Text(if (blocked) "Back" else "Cancel") } },
     )
 }
 
@@ -412,6 +406,7 @@ private fun ReviewDialog(vm: MainViewModel, changes: List<Change>) {
 private fun OptionRow(
     opt: Opt,
     value: String?,
+    applied: Boolean,
     changed: Boolean,
     original: String?,
     onUndo: () -> Unit,
@@ -421,18 +416,25 @@ private fun OptionRow(
     var menu by remember { mutableStateOf(false) }
     val hasPresets = opt.values.isNotEmpty()
     val isCustomValue = value != null && value !in opt.values
+    val soft = MaterialTheme.colorScheme.onSurfaceVariant
+    val shape = RoundedCornerShape(8.dp)
 
-    // a changed option gets a red outline and tint, so it stands out while experimenting
-    val mark = if (changed) {
-        Modifier.background(Red.copy(alpha = 0.12f), RoundedCornerShape(8.dp)).border(1.5.dp, Red, RoundedCornerShape(8.dp))
-    } else {
-        Modifier
+    // red = changed in this session, green = applied on the head unit right now
+    val mark = when {
+        changed -> Modifier.background(Red.copy(alpha = 0.12f), shape).border(1.5.dp, Red, shape)
+        applied -> Modifier.background(Green.copy(alpha = 0.10f), shape).border(1.5.dp, Green, shape)
+        else -> Modifier
     }
     Column(Modifier.fillMaxWidth().padding(vertical = 4.dp).then(mark).padding(horizontal = 8.dp, vertical = 6.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text(opt.title, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
-                Text(opt.key, fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = Color.Gray)
+                Text(opt.key, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
+                if (opt.summary.isNotBlank()) {
+                    Text(opt.summary, fontSize = 12.sp, color = soft, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                }
+                opt.default?.let {
+                    Text("Default: $it", fontSize = 11.sp, color = soft, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
             }
             Box {
                 InfoDot { showInfo = true }
@@ -442,12 +444,17 @@ private fun OptionRow(
         Spacer(Modifier.height(6.dp))
 
         if (!hasPresets) {
+            val ph = when {
+                opt.hint != null -> "(not set, e.g. ${opt.hint})"
+                opt.default != null -> "(not set, default ${opt.default})"
+                else -> "(not set)"
+            }
             OutlinedTextField(
                 value = value ?: "",
                 onValueChange = { onChange(it) },
                 singleLine = true,
                 textStyle = TextStyle(fontSize = 14.sp),
-                placeholder = { Text(opt.hint?.let { "(not set, e.g. $it)" } ?: "(not set, daemon default)") },
+                placeholder = { Text(ph, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 modifier = Modifier.fillMaxWidth(),
             )
         } else {
@@ -456,9 +463,10 @@ private fun OptionRow(
                     val label = when {
                         value == null -> "(not set)"
                         value.isBlank() -> "Custom…"
+                        value in opt.values -> opt.choiceText(value)
                         else -> value
                     }
-                    Text(label, modifier = Modifier.weight(1f), textAlign = TextAlign.Start)
+                    Text(label, modifier = Modifier.weight(1f), textAlign = TextAlign.Start, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text("▾")
                 }
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
@@ -468,30 +476,36 @@ private fun OptionRow(
                     )
                     opt.values.forEach { v ->
                         DropdownMenuItem(
-                            text = { Text(v) },
+                            text = { Text(opt.choiceText(v)) },
                             onClick = { onChange(v); menu = false },
                         )
                     }
-                    if (isCustomValue && !opt.custom) {
-                        DropdownMenuItem(text = { Text(value ?: "") }, onClick = { menu = false })
-                    }
-                    if (opt.custom) {
-                        DropdownMenuItem(
-                            text = { Text("Custom…") },
-                            onClick = { if (value == null || value in opt.values) onChange(""); menu = false },
-                        )
-                    }
+                    DropdownMenuItem(
+                        text = { Text("Custom…") },
+                        onClick = { if (value == null || value in opt.values) onChange(""); menu = false },
+                    )
                 }
             }
-            if (opt.custom && isCustomValue) {
+            if (isCustomValue) {
                 OutlinedTextField(
                     value = value ?: "",
                     onValueChange = { onChange(it) },
                     singleLine = true,
                     textStyle = TextStyle(fontSize = 14.sp),
+                    placeholder = { Text("Type a value") },
                     modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
                 )
             }
+        }
+
+        if (opt.closed && !value.isNullOrBlank() && value !in opt.values) {
+            Text(
+                "\"$value\" is not one of the documented values (${opt.values.joinToString(", ")}). " +
+                    "The daemon may ignore it.",
+                fontSize = 12.sp,
+                color = Amber,
+                modifier = Modifier.padding(top = 4.dp),
+            )
         }
 
         if (changed) {
@@ -506,6 +520,14 @@ private fun OptionRow(
                     Text("Undo", fontSize = 12.sp)
                 }
             }
+        } else if (applied) {
+            Text(
+                "Currently applied on the head unit",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Green,
+                modifier = Modifier.padding(top = 4.dp),
+            )
         }
     }
 }
