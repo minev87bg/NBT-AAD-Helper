@@ -2,6 +2,20 @@ name: Build APK
 on:
   workflow_dispatch:
   push:
+
+# a release is created at the end of every successful build, for the in-app updater to find
+permissions:
+  contents: write
+
+env:
+  # the key's passwords are not what protects it: the keystore file is (see README, "Updates")
+  SIGNING_STORE_PASSWORD: nbtaad-helper
+  SIGNING_KEY_ALIAS: nbtaad
+  SIGNING_KEY_PASSWORD: nbtaad-helper
+  # every build is newer than the one before: the run number is the app's versionCode
+  APP_VERSION_CODE: ${{ github.run_number }}
+  APP_VERSION_NAME: 1.0.${{ github.run_number }}
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -14,11 +28,56 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: 8.9
-      - name: Build debug APK
-        run: gradle assembleDebug --no-daemon
+
+      - name: Unit tests (settings parser, updater)
+        run: gradle testDebugUnitTest --no-daemon
+
+      # Android updates an installed app only with a copy signed by the same key, so every build uses one fixed key:
+      # the SIGNING_KEYSTORE_BASE64 secret if the repository has it, otherwise signing/nbt-aad-helper.keystore.
+      - name: Signing key
+        env:
+          KEYSTORE_B64: ${{ secrets.SIGNING_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/app.keystore"
+            echo "SIGNING_KEYSTORE=$RUNNER_TEMP/app.keystore" >> "$GITHUB_ENV"
+            echo "Signing key: from the SIGNING_KEYSTORE_BASE64 secret"
+          elif [ -f signing/nbt-aad-helper.keystore ]; then
+            echo "SIGNING_KEYSTORE=$GITHUB_WORKSPACE/signing/nbt-aad-helper.keystore" >> "$GITHUB_ENV"
+            echo "Signing key: signing/nbt-aad-helper.keystore from the repository"
+          else
+            echo "::warning::No signing key found. The APK gets a random debug signature and can not be installed over an earlier build."
+          fi
+
+      - name: Build APK
+        run: gradle assembleDebug --no-daemon -PappVersionCode="$APP_VERSION_CODE" -PappVersionName="$APP_VERSION_NAME"
+
+      - name: Show the signing certificate
+        run: |
+          APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner 2>/dev/null | sort -V | tail -1)
+          if [ -n "$APKSIGNER" ]; then
+            "$APKSIGNER" verify --print-certs app/build/outputs/apk/debug/app-debug.apk | grep -E "Signer #1 certificate (SHA-256|DN)" || true
+          fi
+
+      - name: Name the APK
+        run: cp app/build/outputs/apk/debug/app-debug.apk "NBT-AAD-Helper-v$APP_VERSION_NAME.apk"
+
       - uses: actions/upload-artifact@v4
         with:
           name: NbtAadEditor-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
-      - name: Unit tests (settings parser)
-        run: gradle testDebugUnitTest --no-daemon
+          path: NBT-AAD-Helper-v*.apk
+
+      # The app asks GitHub for the latest release at start-up (UpdateLogic.LATEST_URL).
+      - name: Publish release
+        if: github.ref_name == 'main' || github.ref_name == 'add-app-source'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="v$APP_VERSION_NAME"
+          FILE="NBT-AAD-Helper-v$APP_VERSION_NAME.apk"
+          git log -1 --format=%B | grep -v -E '^(Co-Authored-By|Claude-Session):' > notes.txt
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" "$FILE" --clobber
+          else
+            gh release create "$TAG" "$FILE" --target "$GITHUB_SHA" --title "$TAG" --notes-file notes.txt --latest
+          fi

@@ -111,8 +111,9 @@ private fun DetectScreen(vm: MainViewModel) {
                 fontWeight = if (vm.syncOk) FontWeight.SemiBold else FontWeight.Normal,
                 textAlign = TextAlign.Center,
             )
-            if (!vm.syncBusy && !vm.syncOk) {
-                TextButton(onClick = { vm.syncCatalog() }) { Text("check again", fontSize = 12.sp) }
+            UpdateBanner(vm)
+            if ((!vm.syncBusy && !vm.syncOk) || vm.updatePhase == UpdatePhase.FAILED) {
+                TextButton(onClick = { vm.checkAgain() }) { Text("check again", fontSize = 12.sp) }
             }
         }
 
@@ -160,6 +161,49 @@ private fun DetectScreen(vm: MainViewModel) {
     }
 
     if (vm.manualDialog) ManualDialog(vm)
+}
+
+/** Is there a newer version of this app on GitHub? One tap downloads it and hands it to Android's installer. */
+@Composable
+private fun UpdateBanner(vm: MainViewModel) {
+    val offer = vm.updateOffer
+    val installNote = vm.installMessage
+    val msg = installNote ?: vm.updateMessage
+    if (msg.isBlank() && offer == null) return
+    val busy = vm.updatePhase == UpdatePhase.DOWNLOADING
+    val color = when {
+        installNote != null || vm.updatePhase == UpdatePhase.FAILED -> Amber
+        vm.updatePhase == UpdatePhase.AVAILABLE || busy -> MaterialTheme.colorScheme.primary
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Spacer(Modifier.height(6.dp))
+    Text(
+        msg,
+        fontSize = 12.sp,
+        color = color,
+        fontWeight = if (offer != null) FontWeight.SemiBold else FontWeight.Normal,
+        textAlign = TextAlign.Center,
+    )
+    if (busy) {
+        LinearProgressIndicator(
+            progress = { vm.updateProgress },
+            modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+        )
+    }
+    if (offer != null && !busy) {
+        if (offer.notes.isNotBlank()) {
+            Text(
+                offer.notes,
+                fontSize = 11.sp,
+                maxLines = 4,
+                overflow = TextOverflow.Ellipsis,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(top = 2.dp),
+            )
+        }
+        Button(onClick = { vm.startUpdate() }, modifier = Modifier.padding(top = 4.dp)) { Text("UPDATE") }
+    }
 }
 
 @Composable

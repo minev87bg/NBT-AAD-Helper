@@ -82,8 +82,10 @@ class ConfigParserTest {
     @Test
     fun theClusterSettingKnowsOnlyWhatTheDaemonAccepts() {
         val c = opt("NBT_CLUSTER")
-        assertEquals(listOf("j29", "6wa"), c.values)
+        assertEquals(listOf("j29", "6wa", "6wb"), c.values)
         assertTrue(c.closed)
+        assertTrue("6WB" !in c.values)   // capitals are not accepted by the daemon
+        assertEquals(listOf("on", "log"), opt("NBT_HUDTERM").values)   // the setting that makes 6wa / 6wb draw
     }
 
     @Test

@@ -22,6 +22,10 @@ import com.nbtaad.editor.net.EnvRemote
 import com.nbtaad.editor.net.Hsfz
 import com.nbtaad.editor.net.NetworkBinder
 import com.nbtaad.editor.net.friendlyError
+import com.nbtaad.editor.update.Check
+import com.nbtaad.editor.update.InstallEvents
+import com.nbtaad.editor.update.UpdateOffer
+import com.nbtaad.editor.update.Updater
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -29,6 +33,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 enum class Screen { DETECT, OPTIONS }
+enum class UpdatePhase { IDLE, CHECKING, CURRENT, AVAILABLE, DOWNLOADING, FAILED }
 enum class SaveStatus { RUNNING, OK, FAIL }
 enum class LineKind { INFO, OK, ERROR }
 
@@ -123,6 +128,87 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         catalogSource = loaded.source
         catalogSavedAt = loaded.savedAt
         syncCatalog()
+    }
+
+    // ---------------- updates of this app (from the project's GitHub releases) ----------------
+    var updatePhase by mutableStateOf(UpdatePhase.IDLE)
+    var updateMessage by mutableStateOf("")
+    var updateOffer by mutableStateOf<UpdateOffer?>(null)
+    var updateProgress by mutableStateOf(0f)
+
+    // after the properties above: initializers and init blocks run in the order they are written
+    init {
+        checkUpdate()
+    }
+
+    /** What the system installer answered after the file was handed over (cancelled, refused, done). */
+    val installMessage: String? get() = InstallEvents.message
+
+    fun checkAgain() {
+        if (!syncBusy && !syncOk) syncCatalog()
+        if (updatePhase == UpdatePhase.FAILED) checkUpdate()
+    }
+
+    /** Looks for a newer release on GitHub. Needs internet; with none it stays quiet (the settings sync says so). */
+    fun checkUpdate() {
+        if (updatePhase == UpdatePhase.CHECKING || updatePhase == UpdatePhase.DOWNLOADING) return
+        updatePhase = UpdatePhase.CHECKING
+        updateMessage = "Checking for a new version…"
+        updateOffer = null
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                when (val r = Updater.check(ctx)) {
+                    is Check.Newer -> {
+                        updateOffer = r.offer
+                        updatePhase = UpdatePhase.AVAILABLE
+                        updateMessage = "New version available: ${r.offer.tag} (installed: ${Updater.installed(ctx).name})"
+                    }
+                    is Check.Current -> {
+                        updatePhase = UpdatePhase.CURRENT
+                        updateMessage = "The app is up to date (version ${r.installed.name})."
+                    }
+                }
+            } catch (e: Exception) {
+                updatePhase = UpdatePhase.FAILED
+                val offline = e is java.net.UnknownHostException || e is java.net.ConnectException ||
+                    e is java.net.SocketTimeoutException || e.message == "No network with internet"
+                updateMessage = if (offline) "" else "Update check failed: ${friendlyError(e)}"
+            }
+        }
+    }
+
+    /** Downloads the new version, checks it is signed like this one, and hands it to Android's installer. */
+    fun startUpdate() {
+        val offer = updateOffer ?: return
+        if (updatePhase == UpdatePhase.DOWNLOADING) return
+        if (!Updater.mayInstall(ctx)) {
+            updateMessage = "Android first needs your permission: in the settings page that just opened switch on " +
+                "\"Allow from this source\" for this app, go back and press UPDATE again."
+            return
+        }
+        updatePhase = UpdatePhase.DOWNLOADING
+        updateProgress = 0f
+        updateMessage = "Downloading ${offer.tag}…"
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val apk = Updater.download(ctx, offer) { done, total ->
+                    updateProgress = if (total > 0) (done.toFloat() / total).coerceIn(0f, 1f) else 0f
+                }
+                if (Updater.sameSigner(ctx, apk) == false) {
+                    updatePhase = UpdatePhase.FAILED
+                    updateMessage = "This version is signed with a different key than the installed app, so Android " +
+                        "would refuse to replace it. Uninstall the app once and install the new version; later " +
+                        "updates then work in place."
+                    return@launch
+                }
+                updateMessage = "Confirm the installation on the next screen."
+                Updater.install(ctx, apk)
+                updatePhase = UpdatePhase.AVAILABLE
+            } catch (e: Exception) {
+                updatePhase = UpdatePhase.FAILED
+                updateMessage = "The update failed: ${friendlyError(e)}"
+            }
+        }
     }
 
     private fun catalogDescription(): String = when (catalogSource) {

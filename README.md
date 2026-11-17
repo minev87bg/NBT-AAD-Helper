@@ -6,11 +6,25 @@ Android app that edits `/opt/aa/nbt-aad.env` on a BMW / Toyota Supra NBT Evo hea
 Status: tested in a car for detection, reset, read and save. The settings list is new.
 
 ## Get the APK
-Every push runs the "Build APK" workflow (Actions tab). Open the finished run and download the artifact
-`NbtAadEditor-debug-apk` (a zip containing `app-debug.apk`). Install it on the phone and allow
-"install unknown apps".
+Every successful build is published as a release (Releases page, newest on top, `NBT-AAD-Helper-v1.0.N.apk`).
+Download the APK on the phone, install it and allow "install unknown apps". The same file is also the artifact
+`NbtAadEditor-debug-apk` of the "Build APK" run (Actions tab).
 
 You can also open the folder in Android Studio (Ladybug or newer) and use Build > Build APK(s).
+
+## Updates
+At start-up the app asks GitHub for the latest release. When it is newer than the installed one, the first screen shows
+"New version available", the release notes and an UPDATE button. UPDATE downloads the APK, checks its size, its
+checksum and that it is signed with the same key as the installed app, and hands it to Android's installer, which asks
+for one confirmation (Android does not allow an app to install itself silently). The first time, Android also asks
+to allow "install unknown apps" for this app.
+
+How it fits together: the build number is the GitHub run number (version `1.0.N`, versionCode `N`), the workflow
+signs every build with the fixed key in `signing/` and publishes release `v1.0.N`, and the app compares `N` with its own
+versionCode. The updater needs internet, like the settings sync; with none it stays quiet.
+
+Builds made before the updater (and signed with a random key) cannot be updated in place: uninstall the old app
+once, then install a release. From then on updates install over the existing app and keep its data.
 
 ## Use
 1. Open the app once with internet (mobile data, or a WiFi repeater with internet). It checks the project's

@@ -15,14 +15,37 @@ object ConfigOverrides {
             group = ConfigParser.GROUP_MENTIONED,
             summary = "Cluster / head-up display driver for the navigation arrows.",
             info = "Chooses the driver for the cluster arrows (see NBT_KOMBI_NAV). j29 is the default: the J29's " +
-                "SOME/IP KOMBI graph. 6wa is an F-series 6WA cluster, driven through the MOST HUDTerminal. " +
-                "The daemon compares the value exactly and in lowercase: anything else, such as 6WB, or 6WA in " +
-                "capitals, is logged as unknown and the cluster arrows stay off.\n\n" +
-                "Source: the daemon's code (cluster/nav_core.cpp). The README only mentions it in the 6WA rows.\n\n" +
+                "SOME/IP KOMBI graph. 6wa is an F-series 6WA cluster, driven through the MOST HUDTerminal.\n\n" +
+                "6wb is EXPERIMENTAL and is not in the README or in the official daemon yet: it comes from pull " +
+                "request #179 (BMW 6WB cluster) and only exists in the test release tagged 6wb (v1.9.62). A daemon " +
+                "without it logs the value as unknown and the arrows stay off. With it, 6wb starts in a log-only " +
+                "mode: for real drawing also set NBT_HUDTERM=on and NBT_KOMBI_NAV=1 (those two are listed below). " +
+                "Testers reported it not working yet on a 2013 F30 and a 2017 G31.\n\n" +
+                "The daemon compares the value exactly and in lowercase: 6WB or 6WA in capitals is logged as " +
+                "unknown and the cluster arrows stay off.\n\n" +
+                "Source: the daemon's code (cluster/nav_core.cpp) and pull request #179. The README only mentions " +
+                "it in the 6WA rows.\n\n" +
                 "Default: j29",
             default = "j29",
-            values = listOf("j29", "6wa"),
-            labels = mapOf("j29" to "Supra J29", "6wa" to "F-series 6WA"),
+            values = listOf("j29", "6wa", "6wb"),
+            labels = mapOf("j29" to "Supra J29", "6wa" to "F-series 6WA", "6wb" to "F-series 6WB (experimental test build)"),
+            closed = true,
+        ),
+        Opt(
+            key = "NBT_HUDTERM",
+            group = ConfigParser.GROUP_MENTIONED,
+            summary = "6WA / 6WB cluster: draw for real (on) or only write what it would draw to the log (log).",
+            info = "Only used with NBT_CLUSTER=6wa or 6wb (the cluster driver that talks to the MOST HUDTerminal).\n\n" +
+                "log: shadow mode. Everything is worked out and each call is written to the log, but nothing is sent " +
+                "to the cluster.\n" +
+                "on: live mode, the cluster is really drawn on.\n\n" +
+                "6wa: when the setting is absent it is live; log (or any other value) is shadow mode.\n" +
+                "6wb (test build, pull request #179): shadow mode unless the value is exactly on.\n\n" +
+                "Source: the daemon's code (cluster/nav_core.cpp) and pull request #179. The README does not list it.\n\n" +
+                "Default: 6wa live, 6wb log",
+            default = "6wa: on, 6wb: log",
+            values = listOf("on", "log"),
+            labels = mapOf("on" to "draw on the cluster", "log" to "shadow mode, log only"),
             closed = true,
         ),
     )
