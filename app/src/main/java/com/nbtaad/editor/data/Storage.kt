@@ -21,6 +21,9 @@ class Storage(ctx: Context) {
 
     fun saveFromCar(carId: String, text: String) = file(carId, "nbt-aad.env.fromcar").writeText(text)
 
+    fun readFromCar(carId: String): String? =
+        file(carId, "nbt-aad.env.fromcar").takeIf { it.exists() }?.readText()
+
     fun saveDraft(carId: String, text: String) = file(carId, "nbt-aad.env.draft").writeText(text)
 
     fun hasDraft(carId: String): Boolean = file(carId, "nbt-aad.env.draft").exists()

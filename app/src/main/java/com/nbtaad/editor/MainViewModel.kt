@@ -39,6 +39,9 @@ data class DetectState(
 
 data class DialogLine(val text: String, val kind: LineKind = LineKind.INFO)
 
+/** One option whose value differs from what was read from the car. null = not set. */
+data class Change(val key: String, val old: String?, val new: String?)
+
 data class SaveDialogState(
     val lines: List<DialogLine>,
     val status: SaveStatus,
@@ -81,6 +84,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val values = mutableStateMapOf<String, String?>()
     var saveDialog by mutableStateOf<SaveDialogState?>(null)
     private var baseDoc: EnvDoc? = null
+
+    /** The values as they were on the car when last read (or last saved); changes are measured against this. */
+    var orig by mutableStateOf<Map<String, String?>>(emptyMap())
+    var confirmRead by mutableStateOf(false)
+    var review by mutableStateOf<List<Change>?>(null)
 
     /** Folder name for this car's files: the VIN when the ZGW told us, otherwise a fallback. */
     private val carId: String
@@ -215,12 +223,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private fun openOptions(useDraft: Boolean) {
         rows = emptyList()
         values.clear()
+        orig = emptyMap()
         baseDoc = null
         optError = false
         optFeedback = "Press READ OPTIONS to load nbt-aad.env from the head unit."
         if (useDraft) {
             storage.readDraft(carId)?.let {
-                applyDoc(EnvDoc.parse(it))
+                val draft = EnvDoc.parse(it)
+                // changes are shown against the file as it was last read from the car, when we still have it
+                applyDoc(draft, storage.readFromCar(carId)?.let { f -> EnvDoc.parse(f) } ?: draft)
                 optFeedback = "Loaded the unfinished file from the last session. Review it and press SAVE, " +
                     "or press READ OPTIONS to start over from the car."
             }
@@ -236,14 +247,77 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     // Options: read, edit, save
     // =====================================================================
 
-    private fun applyDoc(doc: EnvDoc) {
+    private fun norm(v: String?): String? = v?.takeIf { it.isNotBlank() }
+
+    /**
+     * The list shows every option the file itself names (switched on or commented out), in file order,
+     * with the file's own comments as the description and its values as suggestions. Options that are only
+     * known from the project's issues come after them.
+     */
+    private fun buildRows(doc: EnvDoc): List<Opt> {
+        val fromFile = doc.keys().map { k ->
+            val cat = CATALOG.firstOrNull { it.key == k }
+            val fileVals = doc.fileValues(k)
+            val desc = doc.describe(k)
+            val presets = (fileVals + (cat?.values ?: emptyList())).distinct()
+            val info = buildString {
+                if (desc.isNotBlank()) append("From your nbt-aad.env:\n").append(desc)
+                val note = cat?.info
+                if (!note.isNullOrBlank()) {
+                    if (isNotEmpty()) append("\n\nNotes from the project issues:\n")
+                    append(note)
+                }
+                if (isEmpty()) append("No description in the file.")
+            }
+            Opt(
+                key = k,
+                title = cat?.title ?: k,
+                info = info,
+                values = if (presets.size >= 2 || cat?.values?.isNotEmpty() == true) presets else emptyList(),
+                custom = cat?.custom ?: true,
+                inFile = true,
+                hint = fileVals.firstOrNull(),
+            )
+        }
+        val inFileKeys = fromFile.map { it.key }.toSet()
+        val extra = CATALOG.filter { it.key !in inFileKeys }.map { it.copy(inFile = false) }
+        return fromFile + extra
+    }
+
+    private fun applyDoc(doc: EnvDoc, baseline: EnvDoc = doc) {
         baseDoc = doc
-        val extra = doc.keys()
-            .filter { k -> CATALOG.none { it.key == k } }
-            .map { Opt(it, it, "Not in this app's option list. The value is edited as plain text.") }
-        rows = CATALOG + extra
+        rows = buildRows(doc)
         values.clear()
         rows.forEach { values[it.key] = doc.get(it.key) }
+        orig = rows.associate { it.key to baseline.get(it.key) }
+    }
+
+    fun isChanged(key: String): Boolean = norm(values[key]) != norm(orig[key])
+
+    val changes: List<Change>
+        get() = rows.filter { isChanged(it.key) }.map { Change(it.key, norm(orig[it.key]), norm(values[it.key])) }
+
+    fun undo(key: String) = edit(key, orig[key])
+
+    /** READ OPTIONS: asks first when that would throw away edits. */
+    fun onReadClick() {
+        if (optBusy) return
+        if (changes.isNotEmpty()) confirmRead = true else readOptions()
+    }
+
+    fun readDiscardingChanges() {
+        confirmRead = false
+        readOptions()
+    }
+
+    /** SAVE: shows what is about to change; the upload starts from the preview. */
+    fun requestSave() {
+        review = changes
+    }
+
+    fun confirmSave() {
+        review = null
+        save()
     }
 
     fun readOptions() {
@@ -260,7 +334,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         storage.saveFromCar(carId, res.text)
                         storage.clearDraft(carId)
                         applyDoc(EnvDoc.parse(res.text))
-                        optFeedback = "Read ${res.text.length} bytes, ${rows.size} options listed."
+                        val inFile = rows.filter { it.inFile }
+                        optFeedback = "Read ${res.text.length} bytes: ${inFile.size} options in the file, " +
+                            "${inFile.count { values[it.key] != null }} switched on."
                     }
                     is EnvRemote.ReadResult.NoFile -> {
                         storage.clearDraft(carId)
@@ -317,7 +393,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 EnvRemote.write(hu, text.toByteArray(Charsets.UTF_8)) { addLine(DialogLine(it)) }
                 storage.saveUploaded(carId, text)
                 storage.clearDraft(carId)
-                baseDoc = EnvDoc.parse(text)
+                storage.saveFromCar(carId, text)
+                applyDoc(EnvDoc.parse(text)) // what is on the car now becomes the new baseline, nothing is "changed"
                 addLine(DialogLine("File uploaded and verified.", LineKind.OK))
                 setStatus(SaveStatus.OK)
             } catch (e: Exception) {

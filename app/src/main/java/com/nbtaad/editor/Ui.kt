@@ -217,7 +217,7 @@ private fun OptionsScreen(vm: MainViewModel) {
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Spacer(Modifier.height(h * 0.2f))
-            Button(onClick = { vm.readOptions() }, enabled = !vm.optBusy) { Text("READ OPTIONS") }
+            Button(onClick = { vm.onReadClick() }, enabled = !vm.optBusy) { Text("READ OPTIONS") }
             Text(
                 vm.optFeedback,
                 fontSize = 12.sp,
@@ -225,15 +225,35 @@ private fun OptionsScreen(vm: MainViewModel) {
                 textAlign = TextAlign.Center,
                 modifier = Modifier.padding(vertical = 8.dp),
             )
+            val fileRows = vm.rows.filter { it.inFile }
+            val extraRows = vm.rows.filterNot { it.inFile }
             LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
-                items(vm.rows, key = { it.key }) { opt ->
-                    OptionRow(opt, vm.values[opt.key]) { vm.edit(opt.key, it) }
+                items(fileRows, key = { it.key }) { opt ->
+                    OptionRow(opt, vm.values[opt.key], vm.isChanged(opt.key), vm.orig[opt.key], { vm.undo(opt.key) }) {
+                        vm.edit(opt.key, it)
+                    }
                     HorizontalDivider()
                 }
+                if (extraRows.isNotEmpty()) {
+                    item(key = "__extra_header") {
+                        Text(
+                            "Other known options (not in your file)",
+                            fontSize = 12.sp,
+                            color = Color.Gray,
+                            modifier = Modifier.padding(top = 20.dp, bottom = 4.dp),
+                        )
+                    }
+                    items(extraRows, key = { it.key }) { opt ->
+                        OptionRow(opt, vm.values[opt.key], vm.isChanged(opt.key), vm.orig[opt.key], { vm.undo(opt.key) }) {
+                            vm.edit(opt.key, it)
+                        }
+                        HorizontalDivider()
+                    }
+                }
                 if (vm.rows.isNotEmpty()) {
-                    item {
+                    item(key = "__save") {
                         Button(
-                            onClick = { vm.save() },
+                            onClick = { vm.requestSave() },
                             enabled = vm.saveDialog == null,
                             modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
                         ) { Text("SAVE") }
@@ -243,17 +263,75 @@ private fun OptionsScreen(vm: MainViewModel) {
         }
     }
 
+    if (vm.confirmRead) {
+        val n = vm.changes.size
+        AlertDialog(
+            onDismissRequest = { vm.confirmRead = false },
+            title = { Text("Unsaved changes") },
+            text = {
+                Text(
+                    "$n option${if (n == 1) " is" else "s are"} changed and not saved. Reading the file from the " +
+                        "head unit again will throw those changes away."
+                )
+            },
+            confirmButton = { TextButton(onClick = { vm.readDiscardingChanges() }) { Text("Read anyway") } },
+            dismissButton = { TextButton(onClick = { vm.confirmRead = false }) { Text("Keep editing") } },
+        )
+    }
+
+    vm.review?.let { ReviewDialog(vm, it) }
+
     vm.saveDialog?.let { SaveDialog(vm, it) }
 }
 
 @Composable
-private fun OptionRow(opt: Opt, value: String?, onChange: (String?) -> Unit) {
+private fun ReviewDialog(vm: MainViewModel, changes: List<Change>) {
+    AlertDialog(
+        onDismissRequest = { vm.review = null },
+        title = { Text(if (changes.isEmpty()) "No changes" else "Review changes (${changes.size})") },
+        text = {
+            Column(Modifier.heightIn(max = 380.dp).verticalScroll(rememberScrollState())) {
+                if (changes.isEmpty()) {
+                    Text("Nothing differs from the file that was read. Upload it anyway?", fontSize = 13.sp)
+                }
+                changes.forEach { c ->
+                    Column(Modifier.padding(vertical = 6.dp)) {
+                        Text(c.key, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                        Text("was:  ${c.old ?: "(not set)"}", fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = Red)
+                        Text("now:  ${c.new ?: "(not set)"}", fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = Green)
+                    }
+                    HorizontalDivider()
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { vm.confirmSave() }) { Text(if (changes.isEmpty()) "Upload anyway" else "Upload") }
+        },
+        dismissButton = { TextButton(onClick = { vm.review = null }) { Text("Cancel") } },
+    )
+}
+
+@Composable
+private fun OptionRow(
+    opt: Opt,
+    value: String?,
+    changed: Boolean,
+    original: String?,
+    onUndo: () -> Unit,
+    onChange: (String?) -> Unit,
+) {
     var showInfo by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
     val hasPresets = opt.values.isNotEmpty()
     val isCustomValue = value != null && value !in opt.values
 
-    Column(Modifier.fillMaxWidth().padding(vertical = 10.dp)) {
+    // a changed option gets a red outline and tint, so it stands out while experimenting
+    val mark = if (changed) {
+        Modifier.background(Red.copy(alpha = 0.12f), RoundedCornerShape(8.dp)).border(1.5.dp, Red, RoundedCornerShape(8.dp))
+    } else {
+        Modifier
+    }
+    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp).then(mark).padding(horizontal = 8.dp, vertical = 6.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(opt.title, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
@@ -272,7 +350,7 @@ private fun OptionRow(opt: Opt, value: String?, onChange: (String?) -> Unit) {
                 onValueChange = { onChange(it) },
                 singleLine = true,
                 textStyle = TextStyle(fontSize = 14.sp),
-                placeholder = { Text("(not set, daemon default)") },
+                placeholder = { Text(opt.hint?.let { "(not set, e.g. $it)" } ?: "(not set, daemon default)") },
                 modifier = Modifier.fillMaxWidth(),
             )
         } else {
@@ -316,6 +394,20 @@ private fun OptionRow(opt: Opt, value: String?, onChange: (String?) -> Unit) {
                     textStyle = TextStyle(fontSize = 14.sp),
                     modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
                 )
+            }
+        }
+
+        if (changed) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "Changed. Was: ${original?.takeIf { it.isNotBlank() } ?: "(not set)"}",
+                    fontSize = 12.sp,
+                    color = Red,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = onUndo, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) {
+                    Text("Undo", fontSize = 12.sp)
+                }
             }
         }
     }

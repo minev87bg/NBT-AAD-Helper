@@ -11,6 +11,10 @@ data class Opt(
     val info: String,
     val values: List<String> = emptyList(),
     val custom: Boolean = false,
+    /** false = known from the project's issues but not present in the file on the head unit */
+    val inFile: Boolean = true,
+    /** an example value taken from the file, shown as a hint in an empty text field */
+    val hint: String? = null,
 )
 
 /**
@@ -20,6 +24,11 @@ data class Opt(
  * Keys found in the file on the head unit that are NOT listed here are shown automatically as text fields.
  */
 val CATALOG: List<Opt> = listOf(
+    Opt(
+        "NBT_CLUSTER", "Instrument cluster",
+        "Instrument cluster type code. Choose one of the codes your nbt-aad.env lists (6WA or 6WB).",
+        listOf("6WA", "6WB"), custom = true,
+    ),
     Opt(
         "NBT_SCREEN", "Screen resolution",
         "Panel size as WIDTHxHEIGHT. Newer builds read it from the head unit; set it when the picture is " +
