@@ -103,29 +103,45 @@ fun friendlyError(e: Throwable): String {
 }
 
 object EnvRemote {
-    const val DIR = "/opt/aa"
-    const val PATH = "/opt/aa/nbt-aad.env"
+    /**
+     * The SSH login lands on one processor of the head unit, but the daemon lives on the other one
+     * ("hu-omap"). The project's install guide switches to it with `on -f /net/hu-omap/ /bin/sh`, where the
+     * folder is /opt/aa. From the login shell the same folder is reachable through the QNX network path,
+     * so try the plain path first and then the network paths.
+     */
+    private val DIRS = listOf("/opt/aa", "/net/hu-omap/fs/sda0/opt/aa", "/net/hu-omap/opt/aa")
+    const val FILE = "nbt-aad.env"
 
     sealed class ReadResult {
-        data class Found(val text: String) : ReadResult()
-        object NoFile : ReadResult()
-        object NoFolder : ReadResult()
+        data class Found(val text: String, val dir: String) : ReadResult()
+        data class NoFile(val dir: String) : ReadResult()
+        data class NoFolder(val detail: String) : ReadResult()
+    }
+
+    private fun findDir(ssh: SshSession): String? {
+        val script = "for d in ${DIRS.joinToString(" ")}; do if [ -d \$d ]; then echo \$d; break; fi; done"
+        return ssh.exec(script).text.lineSequence().map { it.trim() }.firstOrNull { it.startsWith("/") }
+    }
+
+    /** What the login shell can see, shown to the user when the folder is not found. */
+    private fun diagnose(ssh: SshSession): String {
+        val r = ssh.exec(
+            "echo '/opt:'; ls /opt 2>&1 | head -12; echo '/net:'; ls /net 2>&1 | head -12; " +
+                "echo 'hu-omap opt:'; ls /net/hu-omap/fs/sda0/opt 2>&1 | head -12"
+        )
+        return r.text.trim().take(600)
     }
 
     fun read(host: String, progress: (String) -> Unit): ReadResult {
         progress("Logging in to $host…")
-        return SshSession(host).use { ssh ->
-            progress("Reading $PATH…")
-            val r = ssh.exec(
-                "if [ ! -d $DIR ]; then echo __NODIR__; " +
-                    "elif [ -f $PATH ]; then cat $PATH; else echo __NOFILE__; fi"
-            )
+        return SshSession(host).use<SshSession, ReadResult> { ssh ->
+            progress("Looking for the NBT-AAD folder…")
+            val dir = findDir(ssh) ?: return@use ReadResult.NoFolder(diagnose(ssh))
+            val path = "$dir/$FILE"
+            progress("Reading $path…")
+            val r = ssh.exec("if [ -f $path ]; then cat $path; else echo __NOFILE__; fi")
             val t = r.text
-            when {
-                t.trim() == "__NODIR__" -> ReadResult.NoFolder
-                t.trim() == "__NOFILE__" -> ReadResult.NoFile
-                else -> ReadResult.Found(t)
-            }
+            if (t.trim() == "__NOFILE__") ReadResult.NoFile(dir) else ReadResult.Found(t, dir)
         }
     }
 
@@ -133,6 +149,10 @@ object EnvRemote {
     fun write(host: String, bytes: ByteArray, progress: (String) -> Unit) {
         progress("Logging in to $host…")
         SshSession(host).use { ssh ->
+            val dir = findDir(ssh)
+                ?: throw IOException("Could not find the NBT-AAD folder (/opt/aa) on the head unit. Is NBT-AAD installed?")
+            val path = "$dir/$FILE"
+
             progress("Making the partition writable…")
             var r = ssh.exec("mount -o remount rw /net/hu-omap/fs/sda0")
             if (r.exit != 0) {
@@ -140,16 +160,16 @@ object EnvRemote {
                 if (r.exit != 0) progress("Remount reported: ${r.err.trim().ifEmpty { "exit ${r.exit}" }} (continuing)")
             }
 
-            progress("Uploading ${bytes.size} bytes…")
-            r = ssh.exec("cat > $PATH.new", stdin = bytes)
+            progress("Uploading ${bytes.size} bytes to $path…")
+            r = ssh.exec("cat > $path.new", stdin = bytes)
             if (r.exit != 0) throw IOException("Upload failed: ${r.err.trim().ifEmpty { "exit ${r.exit}" }}")
 
-            progress("Replacing $PATH…")
-            r = ssh.exec("[ -f $PATH ] && cp $PATH $PATH.bak; mv $PATH.new $PATH && sync")
+            progress("Replacing $FILE…")
+            r = ssh.exec("[ -f $path ] && cp $path $path.bak; mv $path.new $path && sync")
             if (r.exit != 0) throw IOException("Could not replace the file: ${r.err.trim().ifEmpty { "exit ${r.exit}" }}")
 
             progress("Verifying…")
-            val back = ssh.exec("cat $PATH")
+            val back = ssh.exec("cat $path")
             if (!back.out.contentEquals(bytes)) {
                 throw IOException("Verification failed: the file on the head unit differs from what was sent.")
             }

@@ -262,14 +262,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         applyDoc(EnvDoc.parse(res.text))
                         optFeedback = "Read ${res.text.length} bytes, ${rows.size} options listed."
                     }
-                    EnvRemote.ReadResult.NoFile -> {
+                    is EnvRemote.ReadResult.NoFile -> {
                         storage.clearDraft(carId)
                         applyDoc(EnvDoc.parse(""))
-                        optFeedback = "No nbt-aad.env on the head unit yet. Showing defaults, SAVE will create the file."
+                        optFeedback = "Found ${res.dir} but no nbt-aad.env in it yet (the file is optional). " +
+                            "Showing defaults, SAVE will create the file."
                     }
-                    EnvRemote.ReadResult.NoFolder -> {
+                    is EnvRemote.ReadResult.NoFolder -> {
                         optError = true
-                        optFeedback = "Folder /opt/aa not found on the head unit. Is NBT-AAD installed?"
+                        optFeedback = "Folder /opt/aa not found on the head unit. Is NBT-AAD installed?\n" +
+                            "What the SSH shell can see:\n" + res.detail
                     }
                 }
             } catch (e: Exception) {
