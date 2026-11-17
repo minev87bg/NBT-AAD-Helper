@@ -1,0 +1,4 @@
+<resources>
+    <!-- Only the native window background before Compose draws; the real theming is in Theme.kt. -->
+    <style name="Theme.NbtAad" parent="android:Theme.Material.NoActionBar" />
+</resources>

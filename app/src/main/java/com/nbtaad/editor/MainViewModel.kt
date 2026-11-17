@@ -8,6 +8,8 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.nbtaad.editor.data.Storage
+import com.nbtaad.editor.data.ThemeMode
+import com.nbtaad.editor.data.ThemePrefs
 import com.nbtaad.editor.env.CATALOG
 import com.nbtaad.editor.env.EnvDoc
 import com.nbtaad.editor.env.Opt
@@ -46,8 +48,19 @@ data class SaveDialogState(
 class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val ctx = app.applicationContext
     private val storage = Storage(ctx)
+    private val themePrefs = ThemePrefs(ctx)
 
     var screen by mutableStateOf(Screen.DETECT)
+    var themeMode by mutableStateOf(themePrefs.read())
+
+    fun cycleTheme() {
+        themeMode = when (themeMode) {
+            ThemeMode.SYSTEM -> ThemeMode.LIGHT
+            ThemeMode.LIGHT -> ThemeMode.DARK
+            ThemeMode.DARK -> ThemeMode.SYSTEM
+        }
+        themePrefs.write(themeMode)
+    }
 
     // ---------------- screen 1: detect ----------------
     var busy by mutableStateOf(false)

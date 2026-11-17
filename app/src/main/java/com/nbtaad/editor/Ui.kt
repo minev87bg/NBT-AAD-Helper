@@ -17,6 +17,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -27,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
+import com.nbtaad.editor.data.ThemeMode
 import com.nbtaad.editor.env.Opt
 
 private val Green = Color(0xFF2E7D32)
@@ -35,10 +37,26 @@ private val Red = Color(0xFFC62828)
 @Composable
 fun App(vm: MainViewModel) {
     Surface(Modifier.fillMaxSize().safeDrawingPadding()) {
-        when (vm.screen) {
-            Screen.DETECT -> DetectScreen(vm)
-            Screen.OPTIONS -> OptionsScreen(vm)
+        Box(Modifier.fillMaxSize()) {
+            when (vm.screen) {
+                Screen.DETECT -> DetectScreen(vm)
+                Screen.OPTIONS -> OptionsScreen(vm)
+            }
+            ThemeToggle(vm, Modifier.align(Alignment.TopEnd).padding(4.dp))
         }
+    }
+}
+
+/** Small corner control cycling Auto (follows the phone) -> Light -> Dark -> Auto. */
+@Composable
+private fun ThemeToggle(vm: MainViewModel, modifier: Modifier) {
+    val label = when (vm.themeMode) {
+        ThemeMode.SYSTEM -> "Auto"
+        ThemeMode.LIGHT -> "Light"
+        ThemeMode.DARK -> "Dark"
+    }
+    TextButton(onClick = { vm.cycleTheme() }, modifier = modifier) {
+        Text(label, fontSize = 12.sp)
     }
 }
 
@@ -340,10 +358,12 @@ private fun SaveDialog(vm: MainViewModel, d: SaveDialogState) {
     val ok = d.status == SaveStatus.OK
     val scroll = rememberScrollState()
     LaunchedEffect(d.lines.size) { scroll.animateScrollTo(scroll.maxValue) }
+    val isDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+    val successContainer = if (isDark) Color(0xFF1B3B20) else Color(0xFFE8F5E9)
 
     AlertDialog(
         onDismissRequest = { if (d.status != SaveStatus.RUNNING) vm.closeSaveDialog() },
-        containerColor = if (ok) Color(0xFFE8F5E9) else AlertDialogDefaults.containerColor,
+        containerColor = if (ok) successContainer else AlertDialogDefaults.containerColor,
         modifier = if (ok) Modifier.border(2.dp, Green, RoundedCornerShape(28.dp)) else Modifier,
         title = {
             Text(
