@@ -25,7 +25,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
-enum class Screen { DETECT, OPTIONS }
+enum class Screen { DETECT, OPTIONS, MANUAL }
 enum class SaveStatus { RUNNING, OK, FAIL }
 enum class LineKind { INFO, OK, ERROR }
 
@@ -89,6 +89,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     var orig by mutableStateOf<Map<String, String?>>(emptyMap())
     var confirmRead by mutableStateOf(false)
     var review by mutableStateOf<List<Change>?>(null)
+
+    // ---------------- manual edit (raw text editor) ----------------
+    var manualText by mutableStateOf("")
+    private var manualInitial = ""
+    var manualBusy by mutableStateOf(false)
+    var manualMsg by mutableStateOf("")
+    var manualError by mutableStateOf(false)
+    var confirmCloseManual by mutableStateOf(false)
+    val manualDirty: Boolean get() = manualText != manualInitial
+
+    /** The file as it is on the car (last read or last saved); the options list measures changes against it. */
+    private var carDoc: EnvDoc? = null
 
     /** Folder name for this car's files: the VIN when the ZGW told us, otherwise a fallback. */
     private val carId: String
@@ -225,6 +237,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         values.clear()
         orig = emptyMap()
         baseDoc = null
+        carDoc = null
         optError = false
         optFeedback = "Press READ OPTIONS to load nbt-aad.env from the head unit."
         if (useDraft) {
@@ -254,11 +267,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * with the file's own comments as the description and its values as suggestions. Options that are only
      * known from the project's issues come after them.
      */
-    private fun buildRows(doc: EnvDoc): List<Opt> {
-        val fromFile = doc.keys().map { k ->
+    private fun buildRows(doc: EnvDoc, baseline: EnvDoc): List<Opt> {
+        val docKeys = doc.keys()
+        // an option the car's file has but a manual edit deleted stays in the list, marked as changed
+        val allKeys = (docKeys + baseline.keys()).distinct()
+        val fromFile = allKeys.map { k ->
+            val src = if (k in docKeys) doc else baseline
             val cat = CATALOG.firstOrNull { it.key == k }
-            val fileVals = doc.fileValues(k)
-            val desc = doc.describe(k)
+            val fileVals = src.fileValues(k)
+            val desc = src.describe(k)
             val presets = (fileVals + (cat?.values ?: emptyList())).distinct()
             val info = buildString {
                 if (desc.isNotBlank()) append("From your nbt-aad.env:\n").append(desc)
@@ -286,7 +303,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun applyDoc(doc: EnvDoc, baseline: EnvDoc = doc) {
         baseDoc = doc
-        rows = buildRows(doc)
+        carDoc = baseline
+        rows = buildRows(doc, baseline)
         values.clear()
         rows.forEach { values[it.key] = doc.get(it.key) }
         orig = rows.associate { it.key to baseline.get(it.key) }
@@ -318,6 +336,88 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun confirmSave() {
         review = null
         save()
+    }
+
+    // =====================================================================
+    // Manual edit: the raw file in a plain text editor
+    // =====================================================================
+
+    /** Opens the raw file. If it was already read the working copy is shown, otherwise it is downloaded first. */
+    fun openManual() {
+        if (manualBusy) { // a download from an earlier tap is still running: just show the editor again
+            screen = Screen.MANUAL
+            return
+        }
+        manualError = false
+        val loaded = baseDoc
+        if (loaded != null) {
+            val t = renderCurrent() ?: loaded.render()
+            manualText = t
+            manualInitial = t
+            manualMsg = "The file as it is in the options list now, including your pending changes."
+            screen = Screen.MANUAL
+            return
+        }
+        val hu = detect.hu ?: return
+        manualText = ""
+        manualInitial = ""
+        manualBusy = true
+        manualMsg = "Connecting…"
+        screen = Screen.MANUAL
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                NetworkBinder.bindToLocalNetwork(ctx)
+                when (val res = EnvRemote.read(hu) { manualMsg = it }) {
+                    is EnvRemote.ReadResult.Found -> {
+                        storage.saveFromCar(carId, res.text)
+                        carDoc = EnvDoc.parse(res.text)
+                        manualText = res.text
+                        manualInitial = res.text
+                        manualMsg = "Downloaded ${res.text.length} bytes from ${res.dir}/${EnvRemote.FILE}."
+                    }
+                    is EnvRemote.ReadResult.NoFile -> {
+                        carDoc = EnvDoc.parse("")
+                        manualMsg = "There is no ${EnvRemote.FILE} in ${res.dir} yet. Type the file here and press SAVE."
+                    }
+                    is EnvRemote.ReadResult.NoFolder -> {
+                        manualError = true
+                        manualMsg = "Could not find the NBT-AAD folder on the head unit.\n" + res.detail
+                    }
+                }
+            } catch (e: Exception) {
+                manualError = true
+                manualMsg = "Download failed: ${friendlyError(e)}"
+            } finally {
+                manualBusy = false
+            }
+        }
+    }
+
+    /** SAVE in the manual editor: the text goes into the options list, where changes are marked. Nothing is uploaded. */
+    fun applyManual() {
+        if (manualBusy) return
+        val doc = EnvDoc.parse(manualText)
+        val baseline = carDoc ?: doc
+        applyDoc(doc, baseline)
+        val text = renderCurrent()
+        if (text != null && text != baseline.render()) storage.saveDraft(carId, text) else storage.clearDraft(carId)
+        optError = false
+        val n = changes.size
+        optFeedback = if (n == 0) {
+            "Manual edit applied. No option values differ from the car."
+        } else {
+            "Manual edit applied: $n option${if (n == 1) "" else "s"} changed. Review them and press SAVE to upload."
+        }
+        screen = Screen.OPTIONS
+    }
+
+    fun closeManual() {
+        if (manualDirty) confirmCloseManual = true else screen = Screen.OPTIONS
+    }
+
+    fun discardManual() {
+        confirmCloseManual = false
+        screen = Screen.OPTIONS
     }
 
     fun readOptions() {

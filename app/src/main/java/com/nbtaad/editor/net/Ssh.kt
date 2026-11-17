@@ -165,7 +165,12 @@ object EnvRemote {
             if (r.exit != 0) throw IOException("Upload failed: ${r.err.trim().ifEmpty { "exit ${r.exit}" }}")
 
             progress("Replacing $FILE…")
-            r = ssh.exec("[ -f $path ] && cp $path $path.bak; mv $path.new $path && sync")
+            // The head unit's shell has no "sync" command, so none is used; the read-back below proves the write.
+            // Backups next to the file: .orig is made once (the oldest copy), .bak is the previous version.
+            r = ssh.exec(
+                "if [ -f $path ]; then [ -f $path.orig ] || cp $path $path.orig; cp $path $path.bak; fi; " +
+                    "mv $path.new $path"
+            )
             if (r.exit != 0) throw IOException("Could not replace the file: ${r.err.trim().ifEmpty { "exit ${r.exit}" }}")
 
             progress("Verifying…")

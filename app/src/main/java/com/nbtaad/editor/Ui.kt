@@ -10,6 +10,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -18,10 +19,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -41,8 +45,12 @@ fun App(vm: MainViewModel) {
             when (vm.screen) {
                 Screen.DETECT -> DetectScreen(vm)
                 Screen.OPTIONS -> OptionsScreen(vm)
+                Screen.MANUAL -> ManualScreen(vm)
             }
-            ThemeToggle(vm, Modifier.align(Alignment.TopEnd).padding(4.dp))
+            // the text editor uses the whole top row for its own buttons
+            if (vm.screen != Screen.MANUAL) {
+                ThemeToggle(vm, Modifier.align(Alignment.TopEnd).padding(4.dp))
+            }
         }
     }
 }
@@ -261,6 +269,13 @@ private fun OptionsScreen(vm: MainViewModel) {
                 }
             }
         }
+
+        // opens the raw file in the in-app text editor
+        TextButton(
+            onClick = { vm.openManual() },
+            enabled = !vm.optBusy && vm.saveDialog == null,
+            modifier = Modifier.align(Alignment.TopStart).padding(4.dp),
+        ) { Text("manual edit", fontSize = 12.sp) }
     }
 
     if (vm.confirmRead) {
@@ -284,6 +299,84 @@ private fun OptionsScreen(vm: MainViewModel) {
     vm.saveDialog?.let { SaveDialog(vm, it) }
 }
 
+// =========================================================================
+// Manual edit: the raw nbt-aad.env in a plain text editor
+// =========================================================================
+
+@Composable
+private fun ManualScreen(vm: MainViewModel) {
+    BackHandler { vm.closeManual() }
+    val clipboard = LocalClipboardManager.current
+    var copied by remember { mutableStateOf(false) }
+    LaunchedEffect(vm.manualText) { copied = false }
+
+    Column(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            TextButton(onClick = { vm.closeManual() }) { Text("Close", fontSize = 12.sp) }
+            Spacer(Modifier.weight(1f))
+            TextButton(
+                onClick = {
+                    clipboard.setText(AnnotatedString(vm.manualText))
+                    copied = true
+                },
+                enabled = vm.manualText.isNotEmpty(),
+            ) { Text(if (copied) "Copied" else "Copy all", fontSize = 12.sp) }
+        }
+        Text("Manual edit: nbt-aad.env", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+        Text(
+            vm.manualMsg,
+            fontSize = 12.sp,
+            color = if (vm.manualError) Red else Color.Unspecified,
+            maxLines = 6,
+            modifier = Modifier.padding(vertical = 4.dp),
+        )
+        if (vm.manualBusy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(bottom = 6.dp))
+
+        OutlinedTextField(
+            value = vm.manualText,
+            onValueChange = { vm.manualText = it },
+            enabled = !vm.manualBusy,
+            textStyle = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 12.sp),
+            keyboardOptions = KeyboardOptions(
+                capitalization = KeyboardCapitalization.None,
+                autoCorrectEnabled = false,
+            ),
+            placeholder = { Text("(empty)") },
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+        )
+        val lines = vm.manualText.count { it == '\n' } + 1
+        Text(
+            "$lines lines, ${vm.manualText.length} characters" +
+                if (vm.manualDirty) ", edited" else "",
+            fontSize = 11.sp,
+            color = Color.Gray,
+            modifier = Modifier.padding(top = 4.dp),
+        )
+        Button(
+            onClick = { vm.applyManual() },
+            enabled = !vm.manualBusy && !vm.manualError,
+            modifier = Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 8.dp),
+        ) { Text("SAVE") }
+        Text(
+            "SAVE puts this text into the options list, with every changed option marked. " +
+                "Nothing is sent to the car until you press SAVE there.",
+            fontSize = 11.sp,
+            color = Color.Gray,
+            modifier = Modifier.padding(bottom = 8.dp),
+        )
+    }
+
+    if (vm.confirmCloseManual) {
+        AlertDialog(
+            onDismissRequest = { vm.confirmCloseManual = false },
+            title = { Text("Discard your edits?") },
+            text = { Text("The text was changed but not saved. Closing the editor throws those edits away.") },
+            confirmButton = { TextButton(onClick = { vm.discardManual() }) { Text("Discard") } },
+            dismissButton = { TextButton(onClick = { vm.confirmCloseManual = false }) { Text("Keep editing") } },
+        )
+    }
+}
+
 @Composable
 private fun ReviewDialog(vm: MainViewModel, changes: List<Change>) {
     AlertDialog(
@@ -292,7 +385,11 @@ private fun ReviewDialog(vm: MainViewModel, changes: List<Change>) {
         text = {
             Column(Modifier.heightIn(max = 380.dp).verticalScroll(rememberScrollState())) {
                 if (changes.isEmpty()) {
-                    Text("Nothing differs from the file that was read. Upload it anyway?", fontSize = 13.sp)
+                    Text(
+                        "No option value differs from the file on the car (comments or other lines may still " +
+                            "differ). Upload it anyway?",
+                        fontSize = 13.sp,
+                    )
                 }
                 changes.forEach { c ->
                     Column(Modifier.padding(vertical = 6.dp)) {
