@@ -135,7 +135,7 @@ private fun InfoTable(st: DetectState, vm: MainViewModel, modifier: Modifier) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text("SSH Open", fontSize = 14.sp, modifier = Modifier.weight(1f))
-            if (!st.ssh && st.zgw != null) {
+            if (!st.ssh && st.zgw != null && st.vin != null) {
                 OutlinedButton(
                     onClick = { vm.confirmReset = true },
                     enabled = !vm.resetting && !vm.busy,

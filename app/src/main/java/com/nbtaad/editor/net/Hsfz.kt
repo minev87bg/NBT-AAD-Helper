@@ -34,10 +34,16 @@ object Hsfz {
         val text = String(data, 0, len, Charsets.ISO_8859_1)
         if (!text.contains("DIAGADR") && !text.contains("BMWVIN")) return null
         val vin = Regex("BMWVIN([A-Za-z0-9]{17})").find(text)?.groupValues?.get(1)
+            ?.uppercase()?.takeIf { isValidVin(it) }
         val mac = Regex("BMWMAC([0-9A-Fa-f]{12})").find(text)?.groupValues?.get(1)
         val diag = Regex("DIAGADR(\\d+)").find(text)?.groupValues?.get(1)
-        return Ident(ip, vin?.uppercase(), mac, diag)
+        return Ident(ip, vin, mac, diag)
     }
+
+    private val VIN_RE = Regex("[A-HJ-NPR-Z0-9]{17}")
+
+    /** A real VIN: 17 characters, digits and capital letters except I, O and Q. */
+    fun isValidVin(v: String): Boolean = VIN_RE.matches(v)
 
     private fun diagFrame(src: Int, dst: Int, uds: ByteArray): ByteArray {
         val payloadLen = 2 + uds.size
@@ -98,7 +104,8 @@ object Hsfz {
                         val p = f.payload
                         for (i in 0 until p.size - 3 - 17 + 1) {
                             if (p[i] == 0x62.toByte() && p[i + 1] == 0xF1.toByte() && p[i + 2] == 0x90.toByte()) {
-                                return String(p, i + 3, 17, Charsets.ISO_8859_1)
+                                val v = String(p, i + 3, 17, Charsets.ISO_8859_1).uppercase()
+                                if (isValidVin(v)) return v
                             }
                         }
                     }

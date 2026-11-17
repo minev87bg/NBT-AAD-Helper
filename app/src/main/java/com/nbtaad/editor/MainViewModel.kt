@@ -145,6 +145,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Reset the head unit through the ZGW (no SSH), then keep checking until SSH opens. */
     fun resetHeadUnit() {
         val zgw = detect.zgw ?: return
+        if (detect.vin == null) return // only a gateway that gave a VIN is treated as a car
         confirmReset = false
         pollJob?.cancel()
         resetting = true

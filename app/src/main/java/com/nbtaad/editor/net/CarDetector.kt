@@ -136,7 +136,11 @@ object CarDetector {
                             val ip = p.address.hostAddress ?: continue
                             if (ip == net.ip) continue
                             val ident = Hsfz.parseIdent(ip, p.data, p.length)
-                            if (ident != null) return ident
+                            if (ident != null) {
+                                // only a gateway that gives a real VIN counts as a car
+                                val vin = ident.vin ?: Hsfz.readVin(ip)
+                                if (vin != null) return ident.copy(vin = vin)
+                            }
                         }
                     }
                 } catch (_: Exception) {
@@ -234,10 +238,19 @@ object CarDetector {
         if (zgw == null) {
             progress("No answer to the broadcast, scanning for port ${Hsfz.TCP_PORT}…")
             val hosts = nets.flatMap { it.sweepHosts() }.distinct()
-            zgw = sweep(hosts, Hsfz.TCP_PORT, 600).filterValues { it == PortState.OPEN }.keys.firstOrNull()
-            if (zgw != null) vin = Hsfz.readVin(zgw)
+            val candidates = sweep(hosts, Hsfz.TCP_PORT, 600).filterValues { it == PortState.OPEN }.keys.take(3)
+            for (c in candidates) {
+                progress("Asking $c for a VIN…")
+                val v = Hsfz.readVin(c)
+                if (v != null) {
+                    zgw = c
+                    vin = v
+                    break
+                }
+            }
         }
-        if (zgw == null) {
+        // no VIN, no car: a device that merely has the port open is not a gateway
+        if (zgw == null || vin == null) {
             return DetectResult(
                 problem = "No car detected. Verify the WiFi connection (phone, dongle and car in the same " +
                     "network) and press DETECT CAR again."
