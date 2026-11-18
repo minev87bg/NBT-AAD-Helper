@@ -38,8 +38,9 @@ once, then install a release. From then on updates install over the existing app
    ANDROID AUTO**, **EXPERIMENTAL** (browse issues and pull requests, scan them for files; coming next) and
    **CONTRIBUTE** (pick log files from the head unit, zip them, open the issue page in the browser; coming later).
 
-The first screen also has a small "Check for updates" button under the version number. The app and the settings list
-are checked at every start as well, but people often only minimise an app, so the button does it on request.
+The first screen also has a small "Check for updates" button, under the update message at the top, so the result shows
+where the eyes already are. The app and the settings list are checked at every start as well, but people often only
+minimise an app, so the button does it on request.
 
 ### Change a setting
 Every documented setting is listed. READ OPTIONS marks the ones the head unit applies right now

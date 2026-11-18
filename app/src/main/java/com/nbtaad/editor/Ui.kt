@@ -118,8 +118,14 @@ private fun DetectScreen(vm: MainViewModel) {
                 textAlign = TextAlign.Center,
             )
             UpdateBanner(vm)
-            if ((!vm.syncBusy && !vm.syncOk) || vm.updatePhase == UpdatePhase.FAILED) {
-                TextButton(onClick = { vm.checkAgain() }) { Text("check again", fontSize = 12.sp) }
+            if (vm.updateOffer == null) {
+                // under the text that changes when it is pressed: the result appears where the eyes already are
+                TextButton(
+                    onClick = { vm.checkForUpdates() },
+                    enabled = !vm.checkingForUpdates,
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                    modifier = Modifier.height(32.dp),
+                ) { Text("Check for updates", fontSize = 12.sp) }
             }
         }
 
@@ -128,23 +134,12 @@ private fun DetectScreen(vm: MainViewModel) {
             modifier = Modifier.align(Alignment.BottomStart),
         ) { Text("manual IPs", fontSize = 12.sp) }
 
-        Column(
-            Modifier.align(Alignment.BottomEnd).padding(end = 2.dp, bottom = 2.dp),
-            horizontalAlignment = Alignment.End,
-        ) {
-            Text(
-                "v${vm.appVersion}",
-                fontSize = 11.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(end = 6.dp),
-            )
-            TextButton(
-                onClick = { vm.checkForUpdates() },
-                enabled = !vm.checkingForUpdates,
-                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
-                modifier = Modifier.height(32.dp),
-            ) { Text("Check for updates", fontSize = 12.sp) }
-        }
+        Text(
+            "v${vm.appVersion}",
+            fontSize = 11.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.align(Alignment.BottomEnd).padding(end = 6.dp, bottom = 16.dp),
+        )
 
         if (canNext) {
             Button(

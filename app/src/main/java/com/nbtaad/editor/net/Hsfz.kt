@@ -1,5 +1,6 @@
 package com.nbtaad.editor.net
 
+import java.io.IOException
 import java.io.InputStream
 import java.net.InetSocketAddress
 import java.net.Socket
@@ -117,41 +118,52 @@ object Hsfz {
         }
     }
 
-    /** Sends "ECU reset" to the head unit through the ZGW. No SSH needed. Returns (success, message). */
-    fun resetHeadUnit(zgwIp: String): Pair<Boolean, String> {
-        return try {
-            Socket().use { s ->
-                s.tcpNoDelay = true
-                s.connect(InetSocketAddress(zgwIp, TCP_PORT), 3000)
-                s.soTimeout = 3000
-                s.getOutputStream().write(diagFrame(TESTER, HEAD_UNIT, byteArrayOf(0x11, 0x01)))
-                s.getOutputStream().flush()
+    /**
+     * What the reset got: [ok], a text for the person, and [unreachable] when not even a connection to the gateway could
+     * be made (then nothing was sent, so trying again, possibly at another address, is safe).
+     */
+    class ResetResult(val ok: Boolean, val message: String, val unreachable: Boolean = false)
 
-                var gotAck = false
-                val deadline = System.currentTimeMillis() + 8000
-                while (System.currentTimeMillis() < deadline) {
-                    val f = readFrame(s.getInputStream()) ?: break
-                    if (f.type == CW_ACK) {
-                        gotAck = true
-                        continue
-                    }
-                    if (f.type == CW_DIAG && f.payload.size >= 3) {
-                        val uds = f.payload.copyOfRange(2, f.payload.size)
-                        when (uds[0].toInt() and 0xFF) {
-                            0x51 -> return Pair(true, "Head unit accepted the reset command.")
-                            0x7F -> {
-                                val nrc = if (uds.size >= 3) uds[2].toInt() and 0xFF else -1
-                                if (nrc == 0x78) continue // response pending
-                                return Pair(false, "Head unit rejected the reset (error code 0x%02X).".format(nrc))
-                            }
+    /** Sends "ECU reset" to the head unit through the ZGW. No SSH needed. */
+    fun resetHeadUnit(zgwIp: String): ResetResult {
+        val s = Socket()
+        try {
+            s.tcpNoDelay = true
+            try {
+                s.connect(InetSocketAddress(zgwIp, TCP_PORT), 3000)
+            } catch (e: IOException) {
+                return ResetResult(false, "The car's gateway ($zgwIp) does not answer.", unreachable = true)
+            }
+            s.soTimeout = 3000
+            s.getOutputStream().write(diagFrame(TESTER, HEAD_UNIT, byteArrayOf(0x11, 0x01)))
+            s.getOutputStream().flush()
+
+            var gotAck = false
+            val deadline = System.currentTimeMillis() + 8000
+            while (System.currentTimeMillis() < deadline) {
+                val f = readFrame(s.getInputStream()) ?: break
+                if (f.type == CW_ACK) {
+                    gotAck = true
+                    continue
+                }
+                if (f.type == CW_DIAG && f.payload.size >= 3) {
+                    val uds = f.payload.copyOfRange(2, f.payload.size)
+                    when (uds[0].toInt() and 0xFF) {
+                        0x51 -> return ResetResult(true, "Head unit accepted the reset command.")
+                        0x7F -> {
+                            val nrc = if (uds.size >= 3) uds[2].toInt() and 0xFF else -1
+                            if (nrc == 0x78) continue // response pending
+                            return ResetResult(false, "Head unit rejected the reset (error code 0x%02X).".format(nrc))
                         }
                     }
                 }
-                if (gotAck) Pair(true, "Reset command sent (gateway acknowledged it).")
-                else Pair(false, "The gateway did not answer the reset command.")
             }
+            return if (gotAck) ResetResult(true, "Reset command sent (gateway acknowledged it).")
+            else ResetResult(false, "The gateway did not answer the reset command.")
         } catch (e: Exception) {
-            Pair(false, "Could not reach the gateway on port $TCP_PORT: ${e.message}")
+            return ResetResult(false, "Reset failed: ${e.message}")
+        } finally {
+            runCatching { s.close() }
         }
     }
 }

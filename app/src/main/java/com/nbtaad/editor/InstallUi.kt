@@ -580,12 +580,20 @@ private fun DiagDialog(inst: InstallController, text: String) {
 @Composable
 internal fun ResetButton(vm: MainViewModel, modifier: Modifier = Modifier) {
     val note = vm.resetNote
+    val canReset = vm.detect.zgw != null && vm.detect.vin != null
+    val failed = note != null && vm.feedbackError && !vm.resetting
     if (note != null) {
         Column(modifier.fillMaxWidth()) {
-            Text(note, fontSize = 12.sp, color = if (vm.feedbackError && !vm.resetting) Red else Color.Unspecified)
+            Text(note, fontSize = 12.sp, color = if (failed) Red else Color.Unspecified)
             if (vm.resetting) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 6.dp))
+            if (failed && canReset) {
+                OutlinedButton(
+                    onClick = { vm.resetHeadUnit(fromWindow = true) },
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                ) { Text("Try again") }
+            }
         }
-    } else if (vm.detect.zgw != null && vm.detect.vin != null) {
+    } else if (canReset) {
         OutlinedButton(
             onClick = { vm.resetHeadUnit(fromWindow = true) },
             enabled = !vm.resetting && !vm.busy,

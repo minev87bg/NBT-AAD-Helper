@@ -174,11 +174,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** What the system installer answered after the file was handed over (cancelled, refused, done). */
     val installMessage: String? get() = InstallEvents.message
 
-    fun checkAgain() {
-        if (!syncBusy && !syncOk) syncCatalog()
-        if (updatePhase == UpdatePhase.FAILED) checkUpdate()
-    }
-
     /** The "Check for updates" button: the app and the list of settings, now (they are also checked at every start). */
     fun checkForUpdates() {
         syncCatalog()
@@ -384,11 +379,30 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         pollJob = viewModelScope.launch(Dispatchers.IO) {
             try {
                 NetworkBinder.bindToLocalNetwork(ctx)
-                val (ok, msg) = Hsfz.resetHeadUnit(zgw)
-                if (!ok) {
+                var res = Hsfz.resetHeadUnit(zgw)
+                if (res.unreachable) {
+                    // The addresses of the last scan may be old (the hotspot hands out new ones when the dongle joins
+                    // again) or the gateway was busy: look for it again, as DETECT CAR does, and try once more.
+                    feedback = "The gateway did not answer. Looking for it again…"
+                    note("The gateway did not answer. Looking for it again…")
+                    val ident = CarDetector.discoverZgw(CarDetector.localNetworks())
+                    var gw = zgw
+                    if (ident != null && ident.vin != null) {
+                        gw = ident.ip
+                        detect = detect.copy(zgw = ident.ip, vin = ident.vin)
+                    }
+                    res = Hsfz.resetHeadUnit(gw)
+                    if (res.unreachable) {
+                        delay(3000)
+                        res = Hsfz.resetHeadUnit(gw)
+                    }
+                }
+                val msg = res.message
+                if (!res.ok) {
+                    val text = if (res.unreachable) "$msg Is the ignition on? Then try again." else msg
                     feedbackError = true
-                    feedback = msg
-                    note(msg)
+                    feedback = text
+                    note(text)
                     return@launch
                 }
                 detect = detect.copy(ssh = false)
