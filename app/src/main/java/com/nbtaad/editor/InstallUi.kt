@@ -571,10 +571,30 @@ private fun CheckLine(checked: Boolean, onChange: (Boolean) -> Unit, text: Strin
 
 @Composable
 private fun PlanDialog(inst: InstallController, v: PackageView) {
-    var stopped by remember { mutableStateOf(false) }
     var trusted by remember { mutableStateOf(false) }
+    var showInfo by remember { mutableStateOf(false) }
     val pkg = v.pkg
-    val ready = stopped && (v.fromProject || trusted)
+    val ready = v.fromProject || trusted
+    val replaced = listOfNotNull(
+        pkg.payloads[Names.DAEMON]?.let { "nbt-aad (${ReleaseLogic.mb(it.size.toLong())})" },
+        if (pkg.pluginFiles.isEmpty()) null
+        else if (pkg.fullPlugin) "the plugin"
+        else "${pkg.pluginFiles.size} plugin file${if (pkg.pluginFiles.size == 1) "" else "s"}",
+    ).joinToString(" and ")
+    // what does not change the decision is behind the (i)
+    val details = buildString {
+        append("The version on the head unit now is kept (nbt-aad.old")
+        if (pkg.pluginFiles.isNotEmpty()) append(", and the plugin folder as NbtAad.old")
+        append("), so one button goes back to it. Your nbt-aad.env is not touched.")
+        if (pkg.pluginFiles.isNotEmpty() && !pkg.fullPlugin) {
+            append("\n\nThese plugin files are replaced: ${pkg.pluginFiles.joinToString(", ")}. The other plugin files stay as they are.")
+        }
+        if (Names.FIREWALL in pkg.payloads) {
+            append("\n\npf_aa is not installed: the firewall rules are built into nbt-aad and are set up once from the iDrive menu.")
+        }
+        append("\n\nThe app stops Android Auto if it still runs, uploads the files under temporary names, checks that they ")
+        append("arrived complete, and only then renames them.")
+    }
     AlertDialog(
         onDismissRequest = { inst.askInstall = false },
         title = { Text("Install on the head unit?") },
@@ -586,64 +606,32 @@ private fun PlanDialog(inst: InstallController, v: PackageView) {
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
                 )
-                Spacer(Modifier.height(8.dp))
-                pkg.payloads[Names.DAEMON]?.let {
-                    Text(
-                        "nbt-aad (${ReleaseLogic.mb(it.size.toLong())}) is replaced. The one on the head unit now is kept as nbt-aad.old.",
-                        fontSize = 13.sp,
-                    )
+                Spacer(Modifier.height(6.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Replaces $replaced.", fontSize = 13.sp, modifier = Modifier.weight(1f))
+                    Box {
+                        InfoDot { showInfo = true }
+                        if (showInfo) InfoBalloon("What happens", details, mono = false) { showInfo = false }
+                    }
                 }
-                if (pkg.pluginFiles.isNotEmpty()) {
-                    Text(
-                        if (pkg.fullPlugin) {
-                            "The plugin folder is replaced by the ${pkg.pluginFiles.size} new files. The current folder is kept as NbtAad.old."
-                        } else {
-                            "These plugin files are replaced: ${pkg.pluginFiles.joinToString(", ")}. The other plugin files stay " +
-                                "as they are. The current folder is kept as NbtAad.old."
-                        },
-                        fontSize = 13.sp,
-                        modifier = Modifier.padding(top = 4.dp),
-                    )
-                }
-                if (Names.FIREWALL in pkg.payloads) {
-                    Text(
-                        "pf_aa is not installed: the firewall rules are built into nbt-aad and are set up once from the iDrive menu.",
-                        fontSize = 13.sp,
-                        modifier = Modifier.padding(top = 4.dp),
-                    )
-                }
-                Text("Your nbt-aad.env is not touched.", fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
                 if (inst.unit?.hasPrevious == true) {
                     Text(
-                        "A previous version is kept on the head unit now. It is replaced by the version that is on it now, " +
-                            "so the app can only go back one step.",
+                        "The older version kept on the head unit is replaced, so the app can go back only one step.",
                         fontSize = 12.sp,
                         color = Amber,
                         modifier = Modifier.padding(top = 6.dp),
                     )
                 }
-                Text(
-                    "The app stops Android Auto if it still runs, uploads the files under temporary names, checks they " +
-                        "arrived complete, and only then renames them.",
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 8.dp),
-                )
                 if (!v.fromProject) {
                     Text(
-                        "This file does not come from Sq00ky's Releases page. The app can check that it is a program for " +
-                            "the head unit, but not that it is safe or what it does. A wrong file can stop Android Auto " +
-                            "from working. The previous version stays on the head unit, so you can go back.",
+                        "This file is not from Sq00ky's Releases page. The app can check that it is a program for the " +
+                            "head unit, but not that it is safe.",
                         fontSize = 12.sp,
                         color = Red,
                         modifier = Modifier.padding(top = 8.dp),
                     )
                     CheckLine(trusted, { trusted = it }, "I know where this file comes from and I trust it.")
                 }
-                CheckLine(
-                    stopped, { stopped = it },
-                    "Android Auto is stopped on the head unit (Media/Radio, Android Auto, Force Stop).",
-                )
             }
         },
         confirmButton = { TextButton(onClick = { inst.install() }, enabled = ready) { Text("Install") } },
@@ -653,7 +641,7 @@ private fun PlanDialog(inst: InstallController, v: PackageView) {
 
 @Composable
 private fun RevertDialog(inst: InstallController) {
-    var stopped by remember { mutableStateOf(false) }
+    var showInfo by remember { mutableStateOf(false) }
     val u = inst.unit
     val canD = u?.hasPreviousDaemon ?: true
     val canP = u?.hasOldPlugin ?: true
@@ -663,11 +651,24 @@ private fun RevertDialog(inst: InstallController) {
         title = { Text("Go back to the previous version?") },
         text = {
             Column(Modifier.heightIn(max = 440.dp).verticalScroll(rememberScrollState())) {
-                Text(
-                    "Choose what is swapped with the previous version that an install kept on the head unit. Doing it " +
-                        "again goes forward again. Your nbt-aad.env is not touched.",
-                    fontSize = 13.sp,
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "Swap with the previous version that an install kept on the head unit:",
+                        fontSize = 13.sp,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Box {
+                        InfoDot { showInfo = true }
+                        if (showInfo) {
+                            InfoBalloon(
+                                "What happens",
+                                "Doing it again goes forward again. Your nbt-aad.env is not touched. The app stops " +
+                                    "Android Auto if it still runs.",
+                                mono = false,
+                            ) { showInfo = false }
+                        }
+                    }
+                }
                 if (u?.daemonBroken == true) {
                     Text(
                         "The nbt-aad on the head unit now cannot be run: swapping the daemon back repairs Android Auto.",
@@ -686,13 +687,9 @@ private fun RevertDialog(inst: InstallController) {
                     "The plugin: the plugin folder is swapped with NbtAad.old" + if (canP) "" else " (there is no NbtAad.old)",
                     enabled = canP,
                 )
-                CheckLine(
-                    stopped, { stopped = it },
-                    "Android Auto is stopped on the head unit (Media/Radio, Android Auto, Force Stop).",
-                )
             }
         },
-        confirmButton = { TextButton(onClick = { inst.revert() }, enabled = stopped && chosen) { Text("Go back") } },
+        confirmButton = { TextButton(onClick = { inst.revert() }, enabled = chosen) { Text("Go back") } },
         dismissButton = { TextButton(onClick = { inst.askRevert = false }) { Text("Cancel") } },
     )
 }

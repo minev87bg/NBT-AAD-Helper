@@ -112,7 +112,7 @@ object HeadUnit {
         if (!p.scanned) {
             rep.say(
                 "The app cannot see the head unit's process list, so it cannot tell whether Android Auto runs. " +
-                    "It relies on your Force Stop.",
+                    "If it does, press Force Stop (Media/Radio, Android Auto) and run this again.",
                 Level.WARN,
             )
             return

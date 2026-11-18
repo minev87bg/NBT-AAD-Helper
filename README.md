@@ -67,9 +67,11 @@ open SSH itself). It does by program what Sq00ky's `updating.md` does by hand wi
   release has) make it "a build". A lone `nbt-aad` is a daemon test build. Every program is checked to be a
   32-bit ARM file, text files are checked to be text, and the version inside the daemon is read. Zip entries with odd
   paths are skipped and sizes are capped. Files from the phone get a clear warning and need an extra confirmation.
-- INSTALL stops Android Auto (it asks you to Force Stop it, and also tries `kill`), makes the partition writable,
-  uploads each file under a temporary name (`nbt-aad.new`, `NbtAad.new/…`) and checks it arrived intact (the head
-  unit's `cksum`, else a read-back). Only then the old file is renamed to `nbt-aad.old` (the plugin folder to
+- INSTALL looks whether Android Auto still runs and stops it itself (`kill`; if that does not work it stops with a clear
+  message asking for Force Stop), so there is no box to tick. The confirmation shows only what is replaced and what needs
+  a decision (a file from the phone, an older backup that gets replaced); the rest is behind an (i). It makes the partition writable,
+  uploads each file under a temporary name (`nbt-aad.new`, `NbtAad.new/…`) and checks it arrived intact (by its
+  size, else a read-back). Only then the old file is renamed to `nbt-aad.old` (the plugin folder to
   `/opt/aa/NbtAad.old`, never left inside `Plugins`), and the new one takes its place. Nothing is overwritten while it
   is in use. `nbt-aad.env` is not touched. `pf_aa` is not installed: the firewall rules are built into `nbt-aad`.
 - The result window is short: what was installed, a note that restarting the head unit is recommended, and a
