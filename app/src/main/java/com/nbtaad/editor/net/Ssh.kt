@@ -49,13 +49,43 @@ class SshSession(host: String) : AutoCloseable {
         val text: String get() = String(out, Charsets.UTF_8)
     }
 
-    /** Runs one command (the head unit has no sftp/scp, so everything goes through exec channels). */
-    fun exec(cmd: String, stdin: ByteArray? = null, timeoutMs: Long = 20000): Result {
+    /** Counts the bytes the channel takes from [inner], so a long upload can show how far it is. */
+    private class CountingStream(private val inner: ByteArrayInputStream, private val onRead: (Long) -> Unit) :
+        java.io.InputStream() {
+        private var total = 0L
+        override fun read(): Int {
+            val b = inner.read()
+            if (b >= 0) onRead(++total)
+            return b
+        }
+
+        override fun read(b: ByteArray, off: Int, len: Int): Int {
+            val n = inner.read(b, off, len)
+            if (n > 0) {
+                total += n
+                onRead(total)
+            }
+            return n
+        }
+    }
+
+    /**
+     * Runs one command (the head unit has no sftp/scp, so everything goes through exec channels). [onSent] is told
+     * how many bytes of [stdin] have been handed to the connection so far.
+     */
+    fun exec(cmd: String, stdin: ByteArray? = null, timeoutMs: Long = 20000, onSent: ((Long) -> Unit)? = null): Result {
         val ch = session.openChannel("exec") as ChannelExec
         ch.setCommand(cmd)
         val errBuf = ByteArrayOutputStream()
         ch.setErrStream(errBuf)
-        ch.setInputStream(if (stdin != null) ByteArrayInputStream(stdin) else null)
+        val inner = stdin?.let { ByteArrayInputStream(it) }
+        ch.setInputStream(
+            when {
+                inner == null -> null
+                onSent != null -> CountingStream(inner, onSent)
+                else -> inner
+            }
+        )
         val input = ch.inputStream
         ch.connect(5000)
 

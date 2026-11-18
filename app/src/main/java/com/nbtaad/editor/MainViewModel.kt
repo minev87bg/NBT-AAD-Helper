@@ -17,6 +17,7 @@ import com.nbtaad.editor.env.CustomOption
 import com.nbtaad.editor.env.EnvCheck
 import com.nbtaad.editor.env.EnvDoc
 import com.nbtaad.editor.env.Opt
+import com.nbtaad.editor.install.InstallController
 import com.nbtaad.editor.net.CarDetector
 import com.nbtaad.editor.net.CatalogSync
 import com.nbtaad.editor.net.DetectResult
@@ -34,7 +35,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
-enum class Screen { DETECT, OPTIONS }
+enum class Screen { DETECT, HUB, OPTIONS, INSTALL }
 enum class UpdatePhase { IDLE, CHECKING, CURRENT, AVAILABLE, DOWNLOADING, FAILED }
 enum class SaveStatus { RUNNING, OK, FAIL }
 enum class LineKind { INFO, OK, ERROR }
@@ -72,6 +73,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val themePrefs = ThemePrefs(ctx)
 
     var screen by mutableStateOf(Screen.DETECT)
+
+    /** The "Try new things" screen: releases, files, what is on the head unit, install and go back. */
+    val inst = InstallController(ctx, viewModelScope) { detect.hu }
     var themeMode by mutableStateOf(themePrefs.read())
 
     fun cycleTheme() {
@@ -264,8 +268,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     catalogSavedAt = System.currentTimeMillis()
                     syncOk = true
                     syncMessage = "Available settings are synchronized (${parsed.size} settings" +
-                        (if (fresh > 0) ", $fresh new" else "") +
-                        "). Internet is no longer needed, you can continue on the car's WiFi."
+                        (if (fresh > 0) ", $fresh new" else "") + ")."
                 }
             } catch (e: Exception) {
                 syncMessage = "No internet, so no check for new settings. Using the list ${catalogDescription()} " +
@@ -396,8 +399,24 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     // Navigation between the screens
     // =====================================================================
 
+    /** NEXT on the first screen: the page where the person chooses what to do. */
     fun onNext() {
+        screen = Screen.HUB
+    }
+
+    /** "Change a setting": the unfinished file of the last session is offered first, if there is one. */
+    fun chooseSettings() {
         if (storage.hasDraft(carId)) askDraft = true else openOptions(useDraft = false)
+    }
+
+    /** "Try new things": releases, files from the phone, install and the way back. */
+    fun chooseInstall() {
+        inst.open()
+        screen = Screen.INSTALL
+    }
+
+    fun backToHub() {
+        screen = Screen.HUB
     }
 
     fun answerDraft(use: Boolean) {

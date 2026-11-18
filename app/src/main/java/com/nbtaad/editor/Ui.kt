@@ -37,9 +37,9 @@ import com.nbtaad.editor.env.CustomOption
 import com.nbtaad.editor.env.EnvCheck
 import com.nbtaad.editor.env.Opt
 
-private val Green = Color(0xFF2E7D32)
-private val Red = Color(0xFFC62828)
-private val Amber = Color(0xFFC77700)
+internal val Green = Color(0xFF2E7D32)
+internal val Red = Color(0xFFC62828)
+internal val Amber = Color(0xFFC77700)
 
 @Composable
 fun App(vm: MainViewModel) {
@@ -47,7 +47,9 @@ fun App(vm: MainViewModel) {
         Box(Modifier.fillMaxSize()) {
             when (vm.screen) {
                 Screen.DETECT -> DetectScreen(vm)
+                Screen.HUB -> HubScreen(vm)
                 Screen.OPTIONS -> OptionsScreen(vm)
+                Screen.INSTALL -> InstallScreen(vm)
             }
             ThemeToggle(vm, Modifier.align(Alignment.TopEnd).padding(4.dp))
         }
@@ -153,21 +155,6 @@ private fun DetectScreen(vm: MainViewModel) {
             },
             confirmButton = { TextButton(onClick = { vm.resetHeadUnit() }) { Text("Reset") } },
             dismissButton = { TextButton(onClick = { vm.confirmReset = false }) { Text("Cancel") } },
-        )
-    }
-
-    if (vm.askDraft) {
-        AlertDialog(
-            onDismissRequest = {},
-            title = { Text("Unfinished session found") },
-            text = {
-                Text(
-                    "There is an edited nbt-aad.env for this car (${st.vin ?: "unknown VIN"}) that was never " +
-                        "uploaded. Use that file?"
-                )
-            },
-            confirmButton = { TextButton(onClick = { vm.answerDraft(true) }) { Text("Use it") } },
-            dismissButton = { TextButton(onClick = { vm.answerDraft(false) }) { Text("Discard") } },
         )
     }
 
@@ -300,7 +287,7 @@ private fun ManualDialog(vm: MainViewModel) {
 
 @Composable
 private fun OptionsScreen(vm: MainViewModel) {
-    BackHandler { vm.backToDetect() }
+    BackHandler { vm.backToHub() }
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val h = maxHeight

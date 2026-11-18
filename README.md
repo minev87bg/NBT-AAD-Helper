@@ -3,7 +3,7 @@
 Android app that edits `/opt/aa/nbt-aad.env` on a BMW / Toyota Supra NBT Evo head unit running
 [NBT-AAD](https://github.com/Sq00ky/Supra-iDrive6-Android-Auto) (native Android Auto).
 
-Status: tested in a car for detection, reset, read and save. The settings list is new.
+Status: tested in a car for detection, reset, read and save. The settings list is new, and "Try new things" (the installer) has not been tried in a car yet.
 
 ## Get the APK
 Every successful build is published as a release (Releases page, newest on top, `NBT-AAD-Helper-v1.0.N.apk`).
@@ -28,17 +28,41 @@ Builds made before the updater (and signed with a random key) cannot be updated 
 once, then install a release. From then on updates install over the existing app and keep its data.
 
 ## Use
-1. Open the app once with internet (mobile data, or a WiFi repeater with internet). It checks the project's
-   README for new settings and says "Available settings are synchronized". After that no internet is needed;
-   the list is kept on the phone, and a copy is built into the app.
+1. Open the app with internet (mobile data, or a WiFi repeater with internet). It checks the project's
+   README for new settings and says "Available settings are synchronized"; the list is kept on the phone, and a
+   copy is built into the app. Internet is also needed for the app's own updates and for "Try new things" (the
+   releases list and the downloads).
 2. Phone hotspot on, WiFi dongle connected to it (or Ethernet with OTG), car on (ignition / key on).
 3. DETECT CAR. If the dot is red, use "Reset head unit" (no SSH needed) and wait for green.
-4. NEXT. Every documented setting is listed. READ OPTIONS marks the ones the head unit applies right now
-   (green, "Currently applied"). Change values with the dropdowns (Custom... for any other value), then SAVE.
-   A setting that the list does not have yet (from a newer or experimental build) is added with
-   "+ Add an option": a name and, if wanted, a value. It is kept on the phone under "Additional options" (first in the
-   list), whatever the settings sync brings, and "Remove from list" takes it out again.
-5. Restart the Android Auto Daemon from the head unit (Media/Radio > Android Auto > Force Stop).
+4. NEXT opens the page where you choose what to do: **Change a setting**, **Try new things**, or **Contribute**
+   (coming in a later version).
+
+### Change a setting
+Every documented setting is listed. READ OPTIONS marks the ones the head unit applies right now
+(green, "Currently applied"). Change values with the dropdowns (Custom... for any other value), then SAVE.
+A setting that the list does not have yet (from a newer or experimental build) is added with
+"+ Add an option": a name and, if wanted, a value. It is kept on the phone under "Additional options" (first in the
+list), whatever the settings sync brings, and "Remove from list" takes it out again.
+Then restart the Android Auto Daemon from the head unit (Media/Radio > Android Auto > Force Stop).
+
+### Try new things (install a version)
+Installs NBT-AAD files on the head unit from the phone, over the SSH login the app already has (the app does not
+open SSH itself). It does by program what Sq00ky's `updating.md` does by hand with a USB stick:
+
+- The source is a release from Sq00ky's Releases page (the app lists them, pre-releases marked), or any file or
+  files on the phone: a zip, `nbt-aad`, `Releases.zip`, single plugin files. Zip files are opened, also a zip in a zip.
+  The 7 names of a build are `nbt-aad`, `pf_aa` and the five plugin files; 80% of them (6 of 7, which is what a
+  release has) make it "a build". A lone `nbt-aad` is a daemon test build. Every program is checked to be a
+  32-bit ARM file, text files are checked to be text, and the version inside the daemon is read. Zip entries with odd
+  paths are skipped and sizes are capped. Files from the phone get a clear warning and need an extra confirmation.
+- INSTALL stops Android Auto (it asks you to Force Stop it, and also tries `kill`), makes the partition writable,
+  uploads each file under a temporary name (`nbt-aad.new`, `NbtAad.new/…`) and checks it arrived intact (the head
+  unit's `cksum`, else a read-back). Only then the old file is renamed to `nbt-aad.old` (the plugin folder to
+  `/opt/aa/NbtAad.old`, never left inside `Plugins`), and the new one takes its place. Nothing is overwritten while it
+  is in use. `nbt-aad.env` is not touched. `pf_aa` is not installed: the firewall rules are built into `nbt-aad`.
+- Afterwards you restart the head unit (hold the power button 30 seconds), as the update guide says.
+- "Go back to the previous version" swaps the current files with the `.old` ones; pressing it again goes forward.
+  To return to an official version, install it from the releases list.
 
 `nbt-aad.env` is optional and only overrides the daemon's defaults, so the app writes only the settings you
 switch on. Limits of the loader on the head unit, checked before every upload: at most 15 settings, at most
