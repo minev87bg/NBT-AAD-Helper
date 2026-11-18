@@ -35,6 +35,9 @@ once, then install a release. From then on updates install over the existing app
 3. DETECT CAR. If the dot is red, use "Reset head unit" (no SSH needed) and wait for green.
 4. NEXT. Every documented setting is listed. READ OPTIONS marks the ones the head unit applies right now
    (green, "Currently applied"). Change values with the dropdowns (Custom... for any other value), then SAVE.
+   A setting that the list does not have yet (from a newer or experimental build) is added with
+   "+ Add an option": a name and, if wanted, a value. It is kept on the phone under "Additional options" (first in the
+   list), whatever the settings sync brings, and "Remove from list" takes it out again.
 5. Restart the Android Auto Daemon from the head unit (Media/Radio > Android Auto > Force Stop).
 
 `nbt-aad.env` is optional and only overrides the daemon's defaults, so the app writes only the settings you

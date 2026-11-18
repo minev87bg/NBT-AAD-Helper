@@ -10,6 +10,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -22,6 +23,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
@@ -30,6 +32,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import com.nbtaad.editor.data.ThemeMode
+import com.nbtaad.editor.env.ConfigParser
+import com.nbtaad.editor.env.CustomOption
 import com.nbtaad.editor.env.EnvCheck
 import com.nbtaad.editor.env.Opt
 
@@ -346,11 +350,23 @@ private fun OptionsScreen(vm: MainViewModel) {
                             Spacer(Modifier.weight(1f))
                             Text("${visible.size} of ${vm.rows.size}", fontSize = 12.sp, color = Color.Gray)
                         }
+                        OutlinedButton(onClick = { vm.addDialog = "NBT_" }, modifier = Modifier.fillMaxWidth()) {
+                            Text("+ Add an option that is not in the list")
+                        }
                     }
                 }
                 if (visible.isEmpty()) {
                     item(key = "__none") {
-                        Text("No setting matches.", fontSize = 13.sp, modifier = Modifier.padding(vertical = 24.dp))
+                        Column(Modifier.fillMaxWidth().padding(vertical = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("No setting matches.", fontSize = 13.sp)
+                            val q = vm.search.trim()
+                            if (q.isNotEmpty()) {
+                                // a name that is not in the list: offer to add it, the name already filled in
+                                TextButton(onClick = { vm.addDialog = if (CustomOption.isName(q)) q else "NBT_" }) {
+                                    Text("Add \"$q\" as an option", fontSize = 13.sp)
+                                }
+                            }
+                        }
                     }
                 }
                 var lastGroup: String? = null
@@ -369,9 +385,12 @@ private fun OptionsScreen(vm: MainViewModel) {
                         }
                     }
                     item(key = opt.key) {
+                        // only the options the person added can be taken out of the list again
+                        val remove: (() -> Unit)? =
+                            if (opt.group == ConfigParser.GROUP_CUSTOM) ({ vm.removeCustom(opt.key) }) else null
                         OptionRow(
                             opt, vm.values[opt.key], vm.isApplied(opt.key), vm.isChanged(opt.key), vm.orig[opt.key],
-                            { vm.undo(opt.key) },
+                            { vm.undo(opt.key) }, remove,
                         ) { vm.edit(opt.key, it) }
                         HorizontalDivider()
                     }
@@ -413,6 +432,57 @@ private fun OptionsScreen(vm: MainViewModel) {
     vm.review?.let { ReviewDialog(vm, it) }
 
     vm.saveDialog?.let { SaveDialog(vm, it) }
+
+    vm.addDialog?.let { AddOptionDialog(vm, it) }
+}
+
+/** "+ Add an option": a name and, if wanted, its value. The option then lives in "Additional options". */
+@Composable
+private fun AddOptionDialog(vm: MainViewModel, startName: String) {
+    var name by remember { mutableStateOf(startName) }
+    var value by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
+    AlertDialog(
+        onDismissRequest = { vm.addDialog = null },
+        title = { Text("Add an option") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                Text(
+                    "For a setting that this list does not have, for example one from a newer or experimental " +
+                        "build. It is kept on this phone and listed under \"Additional options\".",
+                    fontSize = 12.sp,
+                )
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it; error = null },
+                    singleLine = true,
+                    label = { Text("Name") },
+                    placeholder = { Text("NBT_SOMETHING") },
+                    textStyle = TextStyle(fontSize = 14.sp, fontFamily = FontFamily.Monospace),
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Characters),
+                    modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+                )
+                OutlinedTextField(
+                    value = value,
+                    onValueChange = { value = it; error = null },
+                    singleLine = true,
+                    label = { Text("Value (optional)") },
+                    textStyle = TextStyle(fontSize = 14.sp),
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                )
+                error?.let {
+                    Text(it, fontSize = 12.sp, color = Red, modifier = Modifier.padding(top = 8.dp))
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                val problem = vm.addCustom(name, value)
+                if (problem == null) vm.addDialog = null else error = problem
+            }) { Text("Add") }
+        },
+        dismissButton = { TextButton(onClick = { vm.addDialog = null }) { Text("Cancel") } },
+    )
 }
 
 @Composable
@@ -478,6 +548,7 @@ private fun OptionRow(
     changed: Boolean,
     original: String?,
     onUndo: () -> Unit,
+    onRemove: (() -> Unit)?,
     onChange: (String?) -> Unit,
 ) {
     var showInfo by remember { mutableStateOf(false) }
@@ -596,6 +667,12 @@ private fun OptionRow(
                 color = Green,
                 modifier = Modifier.padding(top = 4.dp),
             )
+        }
+
+        if (onRemove != null) {
+            TextButton(onClick = onRemove, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) {
+                Text("Remove from list", fontSize = 12.sp)
+            }
         }
     }
 }

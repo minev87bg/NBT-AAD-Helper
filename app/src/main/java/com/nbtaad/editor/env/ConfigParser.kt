@@ -16,6 +16,8 @@ package com.nbtaad.editor.env
  * Pure Kotlin on purpose: it runs in plain JVM unit tests.
  */
 object ConfigParser {
+    /** The options the person added by hand; listed first. */
+    const val GROUP_CUSTOM = "Additional options"
     const val GROUP_MENTIONED = "Also mentioned in the descriptions"
     const val GROUP_FILE_ONLY = "In your file, not in the settings list"
 

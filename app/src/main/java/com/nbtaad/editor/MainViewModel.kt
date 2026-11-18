@@ -8,10 +8,12 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.nbtaad.editor.data.CatalogStore
+import com.nbtaad.editor.data.CustomOptionStore
 import com.nbtaad.editor.data.Storage
 import com.nbtaad.editor.data.ThemeMode
 import com.nbtaad.editor.data.ThemePrefs
 import com.nbtaad.editor.env.ConfigParser
+import com.nbtaad.editor.env.CustomOption
 import com.nbtaad.editor.env.EnvCheck
 import com.nbtaad.editor.env.EnvDoc
 import com.nbtaad.editor.env.Opt
@@ -121,6 +123,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     var syncBusy by mutableStateOf(false)
     var syncMessage by mutableStateOf("")
     var syncOk by mutableStateOf(false)
+
+    // options the person added by hand (settings of newer builds that the README does not list yet)
+    private val customStore = CustomOptionStore(ctx)
+    private var customKeys: List<String> = customStore.load()
+
+    /** The "+ Add an option" dialog: the name it starts with, or null while it is closed. */
+    var addDialog by mutableStateOf<String?>(null)
 
     init {
         val loaded = catalogStore.load()
@@ -435,20 +444,88 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      */
     private fun buildRows(doc: EnvDoc?, baseline: EnvDoc?): List<Opt> {
         val known = catalog.map { it.key }.toSet()
+        val mine = customKeys.filter { it !in known }.toSet()
         val extra = LinkedHashSet<String>()
         for (d in listOfNotNull(doc, baseline)) {
-            for (k in d.keys()) if (k !in known && d.get(k) != null) extra += k
+            for (k in d.keys()) if (k !in known && k !in mine && d.get(k) != null) extra += k
         }
-        val extraRows = extra.map { k ->
+        return customRows() + catalog + extra.map { fileOnlyOpt(it) }
+    }
+
+    private fun fileOnlyOpt(k: String) = Opt(
+        key = k,
+        group = ConfigParser.GROUP_FILE_ONLY,
+        summary = "Found in your file, but the README's list of settings does not name it.",
+        info = "This setting is in your nbt-aad.env but not in the README's list of settings. It may be " +
+            "misspelled, or newer or older than the list. The app keeps it as it is.",
+    )
+
+    /**
+     * The options added by hand, first in the list. A name the README's list has by now (a newer sync) is not
+     * listed twice: the README's row takes over.
+     */
+    private fun customRows(): List<Opt> {
+        val known = catalog.map { it.key }.toSet()
+        return customKeys.filter { it !in known }.map { k ->
             Opt(
                 key = k,
-                group = ConfigParser.GROUP_FILE_ONLY,
-                summary = "Found in your file, but the README's list of settings does not name it.",
-                info = "This setting is in your nbt-aad.env but not in the README's list of settings. It may be " +
-                    "misspelled, or newer or older than the list. The app keeps it as it is.",
+                group = ConfigParser.GROUP_CUSTOM,
+                summary = "Added by you.",
+                info = "You added this option yourself, for a setting that the README's list does not have (for " +
+                    "example from a newer or experimental build). The app does not know what it does or which " +
+                    "values it takes, so the value is free text. It stays in this list on this phone, whatever " +
+                    "the settings sync brings. \"Remove from list\" takes it out again.",
             )
         }
-        return catalog + extraRows
+    }
+
+    /** [list] with the added-by-hand rows (re)placed at the top; no other row keeps one of their names. */
+    private fun withCustomRows(list: List<Opt>): List<Opt> {
+        val mine = customKeys.toSet()
+        return customRows() + list.filter { it.group != ConfigParser.GROUP_CUSTOM && it.key !in mine }
+    }
+
+    /**
+     * "+ Add an option". Returns the problem to show in the dialog, or null when it worked. A name the list already
+     * has is not added twice: that row is shown instead (and gets the value, if one was typed).
+     */
+    fun addCustom(name: String, value: String): String? {
+        val p = when (val r = CustomOption.parse(name, value)) {
+            is CustomOption.Bad -> return r.why
+            is CustomOption.Parsed -> r
+        }
+        val existing = rows.firstOrNull { it.key == p.key }
+        if (existing != null && existing.group != ConfigParser.GROUP_FILE_ONLY) {
+            onlyActive = false
+            search = p.key
+            if (p.value.isNotEmpty()) edit(p.key, p.value)
+            optError = false
+            optFeedback = "${p.key} is already in the list, so it is shown here" +
+                (if (p.value.isNotEmpty()) " and set to ${p.value}." else ".")
+            return null
+        }
+        customKeys = customKeys + p.key
+        customStore.save(customKeys)
+        rows = withCustomRows(rows)
+        if (p.value.isNotEmpty()) edit(p.key, p.value)
+        search = ""
+        onlyActive = false
+        optError = false
+        optFeedback = "Added ${p.key} to Additional options (top of the list)" +
+            (if (p.value.isNotEmpty()) ", set to ${p.value}. SAVE uploads it." else ". Set its value there.")
+        return null
+    }
+
+    /** Takes an added option out of the list again. One that the car's file has stays visible as a file-only row. */
+    fun removeCustom(key: String) {
+        customKeys = customKeys - key
+        customStore.save(customKeys)
+        val inFile = baseDoc?.get(key) != null || norm(orig[key]) != null
+        val rest = withCustomRows(rows)
+        rows = if (inFile) rest + fileOnlyOpt(key) else rest
+        if (!inFile) values.remove(key)
+        optError = false
+        optFeedback = "Removed $key from Additional options."
     }
 
     private fun applyDoc(doc: EnvDoc, baseline: EnvDoc = doc) {
