@@ -9,6 +9,9 @@ import java.io.IOException
 class SshUnreachable(message: String, cause: Throwable? = null) : IOException(message, cause)
 
 object Reach {
+    /** Shown where an action needs the head unit and the first screen found none (or was skipped). */
+    const val NO_UNIT = "No head unit is connected. Go back to the first screen and press DETECT CAR."
+
     /** Whether a failed connect means "no connection" (as opposed to a refused login or no common algorithm). */
     fun looksUnreachable(e: Throwable): Boolean {
         val msg = e.message ?: ""
@@ -38,7 +41,7 @@ fun <T> runOnHeadUnit(
     onRescan: () -> Unit = {},
     block: (String) -> T,
 ): T {
-    val first = host() ?: throw IOException("No head unit address yet. Press DETECT CAR on the first screen.")
+    val first = host() ?: throw IOException(Reach.NO_UNIT)
     try {
         return block(first)
     } catch (e: SshUnreachable) {

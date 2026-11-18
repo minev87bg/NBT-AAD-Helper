@@ -1,5 +1,6 @@
 package com.nbtaad.editor.net
 
+import com.nbtaad.editor.log.AppLog
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
@@ -136,6 +137,8 @@ object CarDetector {
                             val ip = p.address.hostAddress ?: continue
                             if (ip == net.ip) continue
                             val ident = Hsfz.parseIdent(ip, p.data, p.length)
+                            AppLog.d("Detect", "Answer to the broadcast from $ip on ${net.name}: " +
+                                (if (ident != null) "an HSFZ identification (VIN ${ident.vin ?: "not in it"})" else "not HSFZ"))
                             if (ident != null) {
                                 // only a gateway that gives a real VIN counts as a car
                                 val vin = ident.vin ?: Hsfz.readVin(ip)
@@ -209,12 +212,20 @@ object CarDetector {
 
         val states = sweep(hosts, SSH_PORT, 700)
         var open = states.filterValues { it == PortState.OPEN }.keys.toList()
+        AppLog.d(
+            "Detect",
+            "SSH sweep of ${hosts.size} addresses: open ${open.ifEmpty { listOf("none") }}, refused " +
+                "${states.filterValues { it == PortState.REFUSED }.keys.toList().ifEmpty { listOf("none") }}"
+        )
         if (open.size > 1 && zgw != null) open = open.filter { it != zgw }.ifEmpty { open }
         if (open.isNotEmpty()) {
-            val best = open.map { it to rank(it) }.minByOrNull { it.second }!!.first
+            val ranked = open.map { it to rank(it) }
+            val best = ranked.minByOrNull { it.second }!!.first
+            AppLog.d("Detect", "Head unit candidates (address=rank, lower is better): $ranked; chosen $best")
             return best to true
         }
         val knownRefused = KNOWN_HU.firstOrNull { states[it] == PortState.REFUSED }
+        AppLog.d("Detect", "No head unit with SSH open; known address that refused: $knownRefused")
         return knownRefused to false
     }
 
@@ -254,10 +265,11 @@ object CarDetector {
             return DetectResult(
                 problem = "No car detected. Verify the WiFi connection (phone, dongle and car in the same " +
                     "network) and press DETECT CAR again."
-            )
+            ).also { AppLog.i("Detect", "Result: no car (gateway $zgw, VIN $vin)") }
         }
         progress("Gateway found at $zgw. Looking for the head unit…")
         val (hu, open) = findHeadUnit(nets, zgw)
+        AppLog.i("Detect", "Result: gateway $zgw, VIN $vin, head unit $hu, SSH open $open")
         return DetectResult(zgwIp = zgw, vin = vin, huIp = hu, sshOpen = open)
     }
 }

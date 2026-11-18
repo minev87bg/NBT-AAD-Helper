@@ -1,5 +1,7 @@
 package com.nbtaad.editor.net
 
+import com.nbtaad.editor.log.AppLog
+import com.nbtaad.editor.log.LogText
 import com.jcraft.jsch.ChannelExec
 import com.jcraft.jsch.JSch
 import com.jcraft.jsch.Session
@@ -42,9 +44,12 @@ class SshSession(host: String) : AutoCloseable {
         cfg["mac.c2s"] = macs
         session.setConfig(cfg)
         session.timeout = 15000
+        val t0 = System.currentTimeMillis()
         try {
             session.connect(8000)
+            AppLog.d("SSH", "Connected to $host (${System.currentTimeMillis() - t0} ms)")
         } catch (e: com.jcraft.jsch.JSchException) {
+            AppLog.w("SSH", "Connecting to $host failed after ${System.currentTimeMillis() - t0} ms: ${e.javaClass.simpleName}: ${e.message}")
             if (Reach.looksUnreachable(e)) throw SshUnreachable(e.message ?: e.toString(), e)
             throw e
         }
@@ -92,6 +97,7 @@ class SshSession(host: String) : AutoCloseable {
             }
         )
         val input = ch.inputStream
+        val t0 = System.currentTimeMillis()
         ch.connect(5000)
 
         val out = ByteArrayOutputStream()
@@ -112,10 +118,21 @@ class SshSession(host: String) : AutoCloseable {
                     }
                     break
                 }
-                if (System.currentTimeMillis() > end) throw IOException("Timed out running a command on the head unit")
+                if (System.currentTimeMillis() > end) {
+                    AppLog.w("SSH", "exec timed out after $timeoutMs ms [${LogText.brief(cmd)}]")
+                    throw IOException("Timed out running a command on the head unit")
+                }
                 Thread.sleep(40)
             }
-            return Result(out.toByteArray(), errBuf.toString("UTF-8"), ch.exitStatus)
+            val res = Result(out.toByteArray(), errBuf.toString("UTF-8"), ch.exitStatus)
+            AppLog.d(
+                "SSH",
+                "exec [${LogText.brief(cmd)}]" + (stdin?.let { " +${it.size} B in" } ?: "") +
+                    " -> exit ${res.exit}, ${res.out.size} B out, ${res.err.length} B err, ${System.currentTimeMillis() - t0} ms" +
+                    (if (res.out.size in 1..4000) "\n  out: " + res.text.trim() else "") +
+                    (if (res.err.isNotBlank()) "\n  err: " + res.err.trim().take(600) else "")
+            )
+            return res
         } finally {
             ch.disconnect()
         }

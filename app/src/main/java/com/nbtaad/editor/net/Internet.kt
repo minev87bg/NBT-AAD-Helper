@@ -1,5 +1,6 @@
 package com.nbtaad.editor.net
 
+import com.nbtaad.editor.log.AppLog
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
@@ -25,6 +26,7 @@ object Internet {
             try {
                 return block { u -> n.openConnection(u) as HttpURLConnection }
             } catch (e: Exception) {
+                AppLog.w("Net", "Request failed on network $n: ${e.javaClass.simpleName}: ${e.message}")
                 last = e
             }
         }
@@ -32,6 +34,7 @@ object Internet {
             try {
                 return block { u -> u.openConnection() as HttpURLConnection }
             } catch (e: Exception) {
+                AppLog.w("Net", "Request failed without a validated network: ${e.javaClass.simpleName}: ${e.message}")
                 last = e
             }
         }

@@ -67,7 +67,8 @@ fun HubScreen(vm: MainViewModel) {
         Text("What do you want to do?", fontSize = 22.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
         Spacer(Modifier.height(4.dp))
         Text(
-            "Car ${vm.detect.vin ?: "(VIN unknown)"}, head unit ${vm.detect.hu ?: "?"}",
+            if (vm.detect.hu == null && vm.detect.vin == null) "No car connected: you can still look around"
+            else "Car ${vm.detect.vin ?: "(VIN unknown)"}, head unit ${vm.detect.hu ?: "?"}",
             fontSize = 12.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -105,7 +106,9 @@ fun HubScreen(vm: MainViewModel) {
                 modifier = Modifier.weight(1f),
             )
         }
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(8.dp))
+        TextButton(onClick = { vm.showLog = true }) { Text("app log", fontSize = 12.sp) }
+        Spacer(Modifier.height(16.dp))
     }
 
     if (vm.askDraft) DraftDialog(vm)
@@ -349,7 +352,7 @@ fun InstallScreen(vm: MainViewModel) {
                 Spacer(Modifier.height(8.dp))
                 OutlinedButton(
                     onClick = { inst.openRevert() },
-                    enabled = !inst.working && inst.unit?.hasPrevious != false,
+                    enabled = !inst.working && inst.hasHost && inst.unit?.hasPrevious != false,
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("Go back to the previous version") }
                 if (inst.unit?.hasPrevious == false) {
@@ -545,10 +548,17 @@ private fun PackageCard(inst: InstallController, v: PackageView) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Button(
                     onClick = { inst.askInstall = true },
-                    enabled = pkg.installable && !inst.working,
+                    enabled = pkg.installable && !inst.working && inst.hasHost,
                 ) { Text("INSTALL ON THE HEAD UNIT") }
                 Spacer(Modifier.width(8.dp))
                 TextButton(onClick = { inst.clearChoice() }, enabled = !inst.working) { Text("Clear") }
+            }
+            if (!inst.hasHost) {
+                Text(
+                    "Needs a connected head unit: press DETECT CAR on the first screen.",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }
@@ -816,7 +826,11 @@ private fun RunDialog(vm: MainViewModel, inst: InstallController, d: RunState) {
                     RunStatus.OK -> {
                         Text(d.headline, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Green)
                         for (m in d.notes) Text(m, fontSize = 12.sp, color = Amber, modifier = Modifier.padding(top = 4.dp))
-                        Text("Restarting the head unit is recommended.", fontSize = 13.sp, modifier = Modifier.padding(top = 10.dp))
+                        Text(
+                            if (d.pluginChanged) "Restart the head unit to load the new plugin." else "Restarting the head unit is recommended.",
+                            fontSize = 13.sp,
+                            modifier = Modifier.padding(top = 10.dp),
+                        )
                     }
                     RunStatus.FAIL -> {
                         Text(d.headline, fontSize = 13.sp, color = Red)

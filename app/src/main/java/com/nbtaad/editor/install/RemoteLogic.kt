@@ -24,6 +24,12 @@ class UnitStatus(
 
     /** An nbt-aad that the head unit cannot run (for example after an install that stopped halfway). */
     val daemonBroken: Boolean get() = files[Names.DAEMON]?.let { !it.executable } ?: false
+
+    /** One line for the log: where the folders are and what is in them. */
+    fun describe(): String =
+        "folder $aaDir, plugin $pluginDir, version $version, files " +
+            files.entries.joinToString { "${it.key}(${it.value.size}${if (it.value.executable) ",exec" else ""})" } +
+            ", ${pluginFiles.size} plugin files, old plugin $hasOldPlugin"
 }
 
 /** The daemon processes found by [RemoteScripts.procScan]: on this processor and on the one that runs Android Auto. */

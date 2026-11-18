@@ -3,7 +3,7 @@
 Android app that edits `/opt/aa/nbt-aad.env` on a BMW / Toyota Supra NBT Evo head unit running
 [NBT-AAD](https://github.com/Sq00ky/Supra-iDrive6-Android-Auto) (native Android Auto).
 
-Status: tested in a car for detection, reset, read, save, install and going back. Version 1.0.16 (every reset scans for the car first, SSH actions look for the car again when the connection fails, new page 2) has not been tried in a car yet. EXPERIMENTAL and CONTRIBUTE are announced but not built.
+Status: tested in a car for detection, reset, read, save, install and going back. Versions 1.0.16 to 1.0.18 (every reset scans for the car first, SSH actions look for the car again, new page 2, Skip, app log) have not been tried in a car yet. EXPERIMENTAL and CONTRIBUTE are announced but not built.
 
 ## Get the APK
 Every successful build is published as a release (Releases page, newest on top, `NBT-AAD-Helper-v1.0.N.apk`).
@@ -36,6 +36,9 @@ once, then install a release. From then on updates install over the existing app
 3. DETECT CAR. If the dot is red, use "Reset head unit" (no SSH needed) and wait for green. Every reset button
    (here and in the result windows) first looks for the car again, as DETECT CAR does, so the reset is sent to the
    gateway as it is now: the phone's hotspot may give the car's parts new addresses between two sessions.
+   A tiny **Skip** under the DETECT CAR button goes on to the rest of the app without a car, to look at the releases or
+   to try things away from the car. What needs the head unit (reading, saving, installing, going back) is switched off
+   or says "No head unit is connected" until the car is detected.
 4. NEXT opens the page where you choose what to do, four tiles: **Install / update** (big green tile, NBT Android
    Auto), **Change a setting** (edit nbt-aad.env), **Experimental** (browse issues and pull requests, scan them for
    files; coming next) and **Contribute** (pick log files from the head unit, zip them, open the issue page in the
@@ -48,6 +51,12 @@ connection was made is not repeated.
 The first screen also has a small "Check for updates" button, under the update message at the top, so the result shows
 where the eyes already are. The app and the settings list are checked at every start as well, but people often only
 minimise an app, so the button does it on request.
+
+### The app log
+The app writes down what it does on the phone (detection steps, every SSH command with its answer, what the screens
+said, every error with where it happened, crashes), about 800 KB at most, with VINs hidden (`WBA…3076`). "app log"
+(bottom right of the first screen, and at the bottom of the choice page) shows its size and has **Save to file**
+(the phone asks where; send that file along when something goes wrong) and **Clear**.
 
 ### Change a setting
 Every documented setting is listed. READ OPTIONS marks the ones the head unit applies right now
@@ -75,7 +84,9 @@ open SSH itself). It does by program what Sq00ky's `updating.md` does by hand wi
   `/opt/aa/NbtAad.old`, never left inside `Plugins`), and the new one takes its place. Nothing is overwritten while it
   is in use. `nbt-aad.env` is not touched. `pf_aa` is not installed: the firewall rules are built into `nbt-aad`.
 - The result window is short: what was installed, a note that restarting the head unit is recommended, and a
-  "Reset HeadUnit" button (the same reset as on the first screen: it looks for the car first, then needs no SSH). "Show log" opens the full log in a
+  "Reset HeadUnit" button (the same reset as on the first screen: it looks for the car first, then needs no SSH). After
+  a plugin was installed the note says to restart the head unit to load it (Sq00ky's update guide ends with a reboot for
+  that); otherwise a restart is only recommended. "Show log" opens the full log in a
   small console. The log carries the time of each step, so a slow step can be seen.
 - Speed: every SSH command costs the head unit a good part of a second, so an install is only a handful of them (look,
   prepare, one upload per file, one check, one replace). Uploads are checked by size (SSH protects the transfer itself);

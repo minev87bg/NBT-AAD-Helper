@@ -5,7 +5,9 @@ import android.net.Uri
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.nbtaad.editor.log.AppLog
 import com.nbtaad.editor.net.NetworkBinder
+import com.nbtaad.editor.net.Reach
 import com.nbtaad.editor.net.friendlyError
 import com.nbtaad.editor.net.runOnHeadUnit
 import kotlinx.coroutines.CoroutineScope
@@ -36,6 +38,8 @@ class RunState(
     val status: RunStatus,
     val headline: String = "",
     val notes: List<String> = emptyList(),
+    /** The plugin was replaced: the head unit loads a plugin only when it restarts. */
+    val pluginChanged: Boolean = false,
 )
 
 /**
@@ -79,10 +83,13 @@ class InstallController(
 
     val working: Boolean get() = prepBusy || unitBusy || job?.status == RunStatus.RUNNING
 
+    /** Is there a head unit to work on? Not when the first screen found none or was skipped. */
+    val hasHost: Boolean get() = host() != null
+
     /** Called when the screen opens: loads what is cheap and read-only. */
     fun open() {
         if (releases == null && !releasesBusy) loadReleases()
-        if (unit == null && !unitBusy && host() != null) readUnit()
+        if (unit == null && !unitBusy) readUnit()
     }
 
     // ---------------- the project's releases ----------------
@@ -97,6 +104,7 @@ class InstallController(
                 releases = all
                 releasesMessage = if (all.isEmpty()) "No release with installable files was found." else ""
             } catch (e: Exception) {
+                AppLog.w("Releases", "Loading the releases failed: ${e.javaClass.simpleName}: ${e.message}")
                 val offline = e is java.net.UnknownHostException || e is java.net.ConnectException ||
                     e is java.net.SocketTimeoutException || e.message == "No network with internet"
                 releasesMessage = if (offline) {
@@ -136,6 +144,7 @@ class InstallController(
                 val pkg = BuildPackage.of(files)
                 finishPrep(PackageView(pkg, SourceKind.RELEASE, r.tag, r.prerelease, r.pageUrl.ifBlank { null }), "release ${r.tag}")
             } catch (e: Exception) {
+                AppLog.e("Releases", "Getting ${r.tag} failed", e)
                 prepError = true
                 prepMessage = "Could not get ${r.tag}: ${friendlyError(e)}"
             } finally {
@@ -162,6 +171,7 @@ class InstallController(
                 val title = if (files.size == 1) files[0].name else "${files.size} files"
                 finishPrep(PackageView(pkg, SourceKind.PHONE, title), title)
             } catch (e: Exception) {
+                AppLog.e("Releases", "Reading the picked file failed", e)
                 prepError = true
                 prepMessage = "Could not read the file: ${friendlyError(e)}"
             } finally {
@@ -172,6 +182,7 @@ class InstallController(
 
     private fun finishPrep(v: PackageView, what: String) {
         val p = v.pkg
+        AppLog.i("Releases", "Prepared $what: kind ${p.kind}, installable ${p.installable}, version ${p.version}, refused ${p.inspection.refused}")
         view = v
         prepError = p.kind == Kind.NOTHING || !p.installable
         prepMessage = when {
@@ -191,7 +202,13 @@ class InstallController(
     // ---------------- the head unit ----------------
 
     fun readUnit() {
-        if (host() == null || unitBusy) return
+        if (unitBusy) return
+        if (host() == null) {
+            unit = null
+            unitError = true
+            unitMessage = Reach.NO_UNIT
+            return
+        }
         unitBusy = true
         unitError = false
         unitMessage = "Looking at the head unit…"
@@ -200,7 +217,9 @@ class InstallController(
                 NetworkBinder.bindToLocalNetwork(ctx)
                 unit = runOnHeadUnit(host, rescan) { HeadUnit.status(it) }
                 unitMessage = ""
+                unit?.let { AppLog.i("Unit", "Status: ${it.describe()}") }
             } catch (e: Exception) {
+                AppLog.e("Unit", "Reading the head unit failed", e)
                 unitError = true
                 unitMessage = friendlyError(e)
             } finally {
@@ -260,14 +279,20 @@ class InstallController(
     }
 
     fun diagnose() {
-        if (host() == null || diagBusy) return
+        if (diagBusy) return
+        if (host() == null) {
+            diagText = Reach.NO_UNIT
+            return
+        }
         diagBusy = true
         diagText = "Asking the head unit…"
         scope.launch(Dispatchers.IO) {
             try {
                 NetworkBinder.bindToLocalNetwork(ctx)
                 diagText = runOnHeadUnit(host, rescan) { HeadUnit.diagnose(it) }
+                AppLog.i("Unit", "TOOLS CHECK:\n" + diagText)
             } catch (e: Exception) {
+                AppLog.e("Unit", "TOOLS CHECK failed", e)
                 diagText = "Could not ask the head unit: ${friendlyError(e)}"
             } finally {
                 diagBusy = false
@@ -276,23 +301,39 @@ class InstallController(
     }
 
     private fun addLine(text: String, level: Level) {
+        val tag = job?.kind?.name?.lowercase()?.replaceFirstChar { it.uppercase() } ?: "Run"
+        when (level) {
+            Level.ERROR -> AppLog.w(tag, "ERROR: $text")
+            Level.WARN -> AppLog.w(tag, text)
+            else -> AppLog.i(tag, text)
+        }
         synchronized(this) { job = job?.let { it.copy2(it.lines + RunLine(text, level)) } }
     }
 
-    private fun RunState.copy2(lines: List<RunLine>) = RunState(kind, lines, status, headline, notes)
+    private fun RunState.copy2(lines: List<RunLine>) = RunState(kind, lines, status, headline, notes, pluginChanged)
 
-    private fun finish(status: RunStatus, headline: String, notes: List<String> = emptyList()) {
-        synchronized(this) { job = job?.let { RunState(it.kind, it.lines, status, headline, notes) } }
+    private fun finish(status: RunStatus, headline: String, notes: List<String> = emptyList(), pluginChanged: Boolean = false) {
+        synchronized(this) { job = job?.let { RunState(it.kind, it.lines, status, headline, notes, pluginChanged) } }
         liveLabel = null
         liveFraction = null
     }
 
     fun install() {
         val v = view ?: return
-        if (host() == null || working) return
+        if (working) return
         askInstall = false
+        if (host() == null) {
+            unitError = true
+            unitMessage = Reach.NO_UNIT
+            return
+        }
         recStarted = false
         job = RunState(RunKind.INSTALL, emptyList(), RunStatus.RUNNING)
+        AppLog.i(
+            "Install",
+            "Install started: ${v.title}${v.pkg.version?.let { " ($it)" } ?: ""}, from ${v.source}, daemon " +
+                "${Names.DAEMON in v.pkg.payloads}, ${v.pkg.pluginFiles.size} plugin files (full plugin: ${v.pkg.fullPlugin})"
+        )
         scope.launch(Dispatchers.IO) {
             try {
                 NetworkBinder.bindToLocalNetwork(ctx)
@@ -307,8 +348,9 @@ class InstallController(
                 ).joinToString(" and ")
                 val headline = "Installed $what" + (out.daemonVersion?.let { " ($it)" } ?: "") + "."
                 addLine(headline, if (out.problems.isEmpty()) Level.OK else Level.WARN)
-                finish(RunStatus.OK, headline, out.problems)
+                finish(RunStatus.OK, headline, out.problems, pluginChanged = out.plugin)
             } catch (e: Exception) {
+                AppLog.e("Install", "Install failed", e)
                 addLine(friendlyError(e), Level.ERROR)
                 finish(RunStatus.FAIL, friendlyError(e))
             }
@@ -316,10 +358,16 @@ class InstallController(
     }
 
     fun revert() {
-        if (host() == null || working) return
+        if (working) return
         val wantDaemon = revertDaemon
         val wantPlugin = revertPlugin
         askRevert = false
+        if (host() == null) {
+            unitError = true
+            unitMessage = Reach.NO_UNIT
+            return
+        }
+        AppLog.i("Revert", "Go back started: daemon $wantDaemon, plugin $wantPlugin")
         job = RunState(RunKind.REVERT, emptyList(), RunStatus.RUNNING)
         scope.launch(Dispatchers.IO) {
             try {
@@ -335,8 +383,9 @@ class InstallController(
                 ).joinToString(" and ")
                 val headline = "Back to the previous $what" + (out.daemonVersion?.let { " ($it)" } ?: "") + "."
                 addLine(headline, Level.OK)
-                finish(RunStatus.OK, headline)
+                finish(RunStatus.OK, headline, pluginChanged = out.plugin)
             } catch (e: Exception) {
+                AppLog.e("Revert", "Go back failed", e)
                 addLine(friendlyError(e), Level.ERROR)
                 finish(RunStatus.FAIL, friendlyError(e))
             }

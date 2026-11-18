@@ -1,5 +1,6 @@
 package com.nbtaad.editor.net
 
+import com.nbtaad.editor.log.AppLog
 import java.io.IOException
 import java.io.InputStream
 import java.net.InetSocketAddress
@@ -114,6 +115,7 @@ object Hsfz {
                 null
             }
         } catch (e: Exception) {
+            AppLog.d("HSFZ", "Reading the VIN from $zgwIp failed: ${e.javaClass.simpleName}: ${e.message}")
             null
         }
     }
@@ -126,12 +128,20 @@ object Hsfz {
 
     /** Sends "ECU reset" to the head unit through the ZGW. No SSH needed. */
     fun resetHeadUnit(zgwIp: String): ResetResult {
+        AppLog.i("HSFZ", "Reset: connecting to $zgwIp:$TCP_PORT")
+        val r = sendReset(zgwIp)
+        AppLog.i("HSFZ", "Reset result: ok=${r.ok}, unreachable=${r.unreachable}, \"${r.message}\"")
+        return r
+    }
+
+    private fun sendReset(zgwIp: String): ResetResult {
         val s = Socket()
         try {
             s.tcpNoDelay = true
             try {
                 s.connect(InetSocketAddress(zgwIp, TCP_PORT), 3000)
             } catch (e: IOException) {
+                AppLog.w("HSFZ", "Reset: no connection to $zgwIp:$TCP_PORT: ${e.javaClass.simpleName}: ${e.message}")
                 return ResetResult(false, "The car's gateway ($zgwIp) does not answer.", unreachable = true)
             }
             s.soTimeout = 3000
@@ -161,6 +171,7 @@ object Hsfz {
             return if (gotAck) ResetResult(true, "Reset command sent (gateway acknowledged it).")
             else ResetResult(false, "The gateway did not answer the reset command.")
         } catch (e: Exception) {
+            AppLog.e("HSFZ", "Reset failed", e)
             return ResetResult(false, "Reset failed: ${e.message}")
         } finally {
             runCatching { s.close() }

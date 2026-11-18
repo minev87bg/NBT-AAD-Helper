@@ -18,12 +18,17 @@ import com.nbtaad.editor.env.EnvCheck
 import com.nbtaad.editor.env.EnvDoc
 import com.nbtaad.editor.env.Opt
 import com.nbtaad.editor.install.InstallController
+import com.nbtaad.editor.log.AppLog
+import com.nbtaad.editor.log.exportName
+import com.nbtaad.editor.log.saveTo
+import com.nbtaad.editor.log.start
 import com.nbtaad.editor.net.CarDetector
 import com.nbtaad.editor.net.CatalogSync
 import com.nbtaad.editor.net.DetectResult
 import com.nbtaad.editor.net.EnvRemote
 import com.nbtaad.editor.net.Hsfz
 import com.nbtaad.editor.net.NetworkBinder
+import com.nbtaad.editor.net.Reach
 import com.nbtaad.editor.net.friendlyError
 import com.nbtaad.editor.net.runOnHeadUnit
 import com.nbtaad.editor.update.Check
@@ -70,10 +75,21 @@ data class SaveDialogState(
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val ctx = app.applicationContext
+
+    init {
+        AppLog.start(ctx)
+    }
+
     private val storage = Storage(ctx)
     private val themePrefs = ThemePrefs(ctx)
 
-    var screen by mutableStateOf(Screen.DETECT)
+    private var screenState by mutableStateOf(Screen.DETECT)
+    var screen: Screen
+        get() = screenState
+        set(v) {
+            if (v != screenState) AppLog.i("Screen", "$screenState -> $v")
+            screenState = v
+        }
 
     /** The "Install / update NBT Android Auto" screen: releases, files, what is on the head unit, install and go back. */
     val inst = InstallController(ctx, viewModelScope, host = { detect.hu }, rescan = { rescanForHost() })
@@ -91,7 +107,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     // ---------------- screen 1: detect ----------------
     var busy by mutableStateOf(false)
     var resetting by mutableStateOf(false)
-    var feedback by mutableStateOf("")
+    private var feedbackState by mutableStateOf("")
+
+    /** The line under DETECT CAR; whatever it says is also written to the log. */
+    var feedback: String
+        get() = feedbackState
+        set(v) {
+            feedbackState = v
+            AppLog.i("Detect", v)
+        }
     var feedbackError by mutableStateOf(false)
     var detect by mutableStateOf(DetectState())
     var confirmReset by mutableStateOf(false)
@@ -107,7 +131,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---------------- screen 2: options ----------------
     var optBusy by mutableStateOf(false)
-    var optFeedback by mutableStateOf("")
+    private var optFeedbackState by mutableStateOf("")
+    var optFeedback: String
+        get() = optFeedbackState
+        set(v) {
+            optFeedbackState = v
+            AppLog.i("Options", v)
+        }
     var optError by mutableStateOf(false)
     var rows by mutableStateOf<List<Opt>>(emptyList())
     val values = mutableStateMapOf<String, String?>()
@@ -194,16 +224,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 when (val r = Updater.check(ctx)) {
                     is Check.Newer -> {
+                        AppLog.i("Update", "New version ${r.offer.tag} is available")
                         updateOffer = r.offer
                         updatePhase = UpdatePhase.AVAILABLE
                         updateMessage = "New version available: ${r.offer.tag} (installed: ${Updater.installed(ctx).name})"
                     }
                     is Check.Current -> {
+                        AppLog.i("Update", "The app is up to date (${r.installed.name})")
                         updatePhase = UpdatePhase.CURRENT
                         updateMessage = "The app is up to date (version ${r.installed.name})."
                     }
                 }
             } catch (e: Exception) {
+                AppLog.w("Update", "Update check failed: ${e.javaClass.simpleName}: ${e.message}")
                 updatePhase = UpdatePhase.FAILED
                 val offline = e is java.net.UnknownHostException || e is java.net.ConnectException ||
                     e is java.net.SocketTimeoutException || e.message == "No network with internet"
@@ -241,6 +274,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 Updater.install(ctx, apk)
                 updatePhase = UpdatePhase.AVAILABLE
             } catch (e: Exception) {
+                AppLog.e("Update", "The update failed", e)
                 updatePhase = UpdatePhase.FAILED
                 updateMessage = "The update failed: ${friendlyError(e)}"
             }
@@ -280,8 +314,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     syncOk = true
                     syncMessage = "Available settings are synchronized (${parsed.size} settings" +
                         (if (fresh > 0) ", $fresh new" else "") + ")."
+                    AppLog.i("Catalog", syncMessage)
                 }
             } catch (e: Exception) {
+                AppLog.w("Catalog", "Settings sync failed: ${e.javaClass.simpleName}: ${e.message}")
                 syncMessage = "No internet, so no check for new settings. Using the list ${catalogDescription()} " +
                     "(${catalog.size} settings). Connect to the internet once to update it."
             } finally {
@@ -312,6 +348,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 val r = CarDetector.detect { feedback = it }
                 applyResult(r)
             } catch (e: Exception) {
+                AppLog.e("Detect", "Detection failed", e)
                 feedbackError = true
                 feedback = "Detection failed: ${friendlyError(e)}"
             } finally {
@@ -321,6 +358,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun applyResult(r: DetectResult) {
+        AppLog.i("Detect", "Applied: gateway ${r.zgwIp}, VIN ${r.vin}, head unit ${r.huIp}, SSH ${r.sshOpen}, problem ${r.problem}")
         detect = DetectState(r.zgwIp != null, r.zgwIp, r.huIp, r.vin, r.sshOpen)
         feedbackError = false
         feedback = when {
@@ -346,6 +384,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 NetworkBinder.bindToLocalNetwork(ctx)
                 val z = zgwText.trim().ifEmpty { null }
                 val h = huText.trim().ifEmpty { null }
+                AppLog.i("Detect", "Manual addresses: gateway $z, head unit $h")
                 val vin = z?.let { Hsfz.readVin(it) }
                 val ssh = h?.let { CarDetector.sshOpen(it) } ?: false
                 detect = DetectState(z != null || h != null, z, h, vin, ssh)
@@ -355,6 +394,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     else -> "Gateway set. Enter the head unit address too."
                 }
             } catch (e: Exception) {
+                AppLog.e("Detect", "Checking the manual addresses failed", e)
                 feedbackError = true
                 feedback = "Check failed: ${friendlyError(e)}"
             } finally {
@@ -380,7 +420,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         pollJob = viewModelScope.launch(Dispatchers.IO) {
             try {
                 NetworkBinder.bindToLocalNetwork(ctx)
-                val scan = CarDetector.detect { if (!fromWindow) feedback = it }
+                AppLog.i("Reset", "Reset requested (from a result window: $fromWindow). Known: gateway ${detect.zgw}, head unit ${detect.hu}")
+                val scan = CarDetector.detect { if (!fromWindow) feedback = it else AppLog.i("Detect", it) }
                 var gw = detect.zgw
                 if (scan.zgwIp != null) {
                     gw = scan.zgwIp
@@ -389,6 +430,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         hu = scan.huIp ?: detect.hu, ssh = scan.sshOpen,
                     )
                 }
+                AppLog.i("Reset", "Scan before the reset: gateway ${scan.zgwIp}, head unit ${scan.huIp}, SSH ${scan.sshOpen}; sending to $gw")
                 if (gw == null) {
                     val text = scan.problem ?: "No car detected."
                     feedbackError = true
@@ -432,6 +474,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 feedback = "SSH did not open within 4 minutes. Check the head unit, then press DETECT CAR."
                 note("The head unit did not come back within 4 minutes.")
             } catch (e: Exception) {
+                AppLog.e("Reset", "Reset failed", e)
                 feedbackError = true
                 feedback = "Reset failed: ${friendlyError(e)}"
                 note("Reset failed: ${friendlyError(e)}")
@@ -444,7 +487,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Looks for the car again (what DETECT CAR does); returns the head unit's address when SSH answers there. */
     private fun rescanForHost(): String? {
         NetworkBinder.bindToLocalNetwork(ctx)
-        val r = CarDetector.detect { }
+        AppLog.i("Detect", "Looking for the car again (no SSH connection)")
+        val r = CarDetector.detect { AppLog.i("Detect", it) }
         applyResult(r)
         return if (r.sshOpen) r.huIp else null
     }
@@ -456,6 +500,41 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** NEXT on the first screen: the page where the person chooses what to do. */
     fun onNext() {
         screen = Screen.HUB
+    }
+
+    /**
+     * SKIP on the first screen: on to the rest of the app without a car (to look at the releases, or to try the app away
+     * from the car). What needs the head unit says so when it is used.
+     */
+    fun onSkip() {
+        AppLog.i("Detect", "Skipped: on to the choice page with gateway ${detect.zgw}, head unit ${detect.hu}")
+        screen = Screen.HUB
+    }
+
+    // ---------------- the app log ----------------
+    var showLog by mutableStateOf(false)
+    var logNote by mutableStateOf("")
+
+    fun logSizeText(): String = AppLog.size().let { if (it < 1024) "$it bytes" else "${it / 1024} KB" }
+
+    fun suggestedLogName(): String = AppLog.exportName()
+
+    fun saveLogTo(uri: android.net.Uri) {
+        viewModelScope.launch(Dispatchers.IO) {
+            logNote = try {
+                val n = AppLog.saveTo(ctx, uri)
+                AppLog.i("App", "The log was saved to a file ($n bytes)")
+                "Saved (${n / 1024} KB). Send that file along when something goes wrong."
+            } catch (e: Exception) {
+                AppLog.e("App", "Saving the log failed", e)
+                "Could not save the log: ${friendlyError(e)}"
+            }
+        }
+    }
+
+    fun clearLog() {
+        AppLog.clear()
+        logNote = "The log was cleared."
     }
 
     /** "Change a setting": the unfinished file of the last session is offered first, if there is one. */
@@ -661,7 +740,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun readOptions() {
-        if (detect.hu == null || optBusy) return
+        if (optBusy) return
+        if (detect.hu == null) {
+            optError = true
+            optFeedback = Reach.NO_UNIT
+            return
+        }
         optBusy = true
         optError = false
         optFeedback = "Connecting…"
@@ -694,6 +778,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     }
                 }
             } catch (e: Exception) {
+                AppLog.e("Options", "Reading nbt-aad.env failed", e)
                 optError = true
                 optFeedback = "Read failed: ${friendlyError(e)}"
             } finally {
@@ -718,15 +803,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun addLine(l: DialogLine) {
+        AppLog.i("Save", l.text)
         saveDialog = saveDialog?.let { it.copy(lines = it.lines + l) }
     }
 
     private fun setStatus(s: SaveStatus, connectionOk: Boolean = false) {
+        AppLog.i("Save", "Status: $s")
         saveDialog = saveDialog?.copy(status = s, connectionOk = connectionOk)
     }
 
     fun save() {
-        if (detect.hu == null) return
+        if (detect.hu == null) {
+            saveDialog = SaveDialogState(listOf(DialogLine(Reach.NO_UNIT, LineKind.ERROR)), SaveStatus.FAIL)
+            return
+        }
         val text = renderCurrent() ?: return
         storage.saveDraft(carId, text)
         saveDialog = SaveDialogState(listOf(DialogLine("Preparing ${text.length} bytes…")), SaveStatus.RUNNING)
@@ -744,6 +834,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 addLine(DialogLine("File uploaded and verified.", LineKind.OK))
                 setStatus(SaveStatus.OK)
             } catch (e: Exception) {
+                AppLog.e("Save", "Saving nbt-aad.env failed", e)
                 addLine(DialogLine(friendlyError(e), LineKind.ERROR))
                 setStatus(SaveStatus.FAIL)
             }
@@ -778,6 +869,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     setStatus(SaveStatus.FAIL)
                 }
             } catch (e: Exception) {
+                AppLog.e("Save", "Checking the connection failed", e)
                 addLine(DialogLine(friendlyError(e), LineKind.ERROR))
                 setStatus(SaveStatus.FAIL)
             }

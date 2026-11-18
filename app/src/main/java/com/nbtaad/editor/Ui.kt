@@ -1,6 +1,8 @@
 package com.nbtaad.editor
 
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -53,7 +55,39 @@ fun App(vm: MainViewModel) {
             }
             ThemeToggle(vm, Modifier.align(Alignment.TopEnd).padding(4.dp))
         }
+        if (vm.showLog) AppLogDialog(vm)
     }
+}
+
+/** What the app writes down about its work (for finding out what went wrong): save it to a file and send it along. */
+@Composable
+internal fun AppLogDialog(vm: MainViewModel) {
+    val saver = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
+        if (uri != null) vm.saveLogTo(uri)
+    }
+    AlertDialog(
+        onDismissRequest = { vm.showLog = false; vm.logNote = "" },
+        title = { Text("App log") },
+        text = {
+            Column {
+                Text(
+                    "The app writes down what it does (detection, SSH steps, errors) on this phone: ${vm.logSizeText()} " +
+                        "now. When something goes wrong, save it to a file and send that file along. The VIN is hidden in it.",
+                    fontSize = 13.sp,
+                )
+                if (vm.logNote.isNotBlank()) {
+                    Text(vm.logNote, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { saver.launch(vm.suggestedLogName()) }) { Text("Save to file") } },
+        dismissButton = {
+            Row {
+                TextButton(onClick = { vm.clearLog() }) { Text("Clear") }
+                TextButton(onClick = { vm.showLog = false; vm.logNote = "" }) { Text("Close") }
+            }
+        },
+    )
 }
 
 /** Small corner control cycling Auto (follows the phone) -> Light -> Dark -> Auto. */
@@ -88,20 +122,27 @@ private fun DetectScreen(vm: MainViewModel) {
             modifier = Modifier.align(Alignment.TopCenter).offset(y = h * 0.5f - 20.dp),
         ) { Text("DETECT CAR") }
 
+        // on to the rest of the app without a car (to look around, or to try things away from the car)
+        TextButton(
+            onClick = { vm.onSkip() },
+            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
+            modifier = Modifier.align(Alignment.TopCenter).offset(y = h * 0.5f + 22.dp).height(28.dp),
+        ) { Text("Skip", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+
         Text(
             vm.feedback,
             fontSize = 12.sp,
             color = if (vm.feedbackError) Red else Color.Unspecified,
             textAlign = TextAlign.Center,
             maxLines = 4,
-            modifier = Modifier.align(Alignment.TopCenter).offset(y = h * 0.5f + 32.dp).fillMaxWidth(),
+            modifier = Modifier.align(Alignment.TopCenter).offset(y = h * 0.5f + 54.dp).fillMaxWidth(),
         )
 
         // information table at about 3/4 of the screen
         if (st.carFound) {
             InfoTable(
                 st, vm,
-                Modifier.align(Alignment.TopCenter).offset(y = h * 0.64f).fillMaxWidth(0.92f),
+                Modifier.align(Alignment.TopCenter).offset(y = h * 0.66f).fillMaxWidth(0.92f),
             )
         }
 
@@ -134,12 +175,19 @@ private fun DetectScreen(vm: MainViewModel) {
             modifier = Modifier.align(Alignment.BottomStart),
         ) { Text("manual IPs", fontSize = 12.sp) }
 
-        Text(
-            "v${vm.appVersion}",
-            fontSize = 11.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.align(Alignment.BottomEnd).padding(end = 6.dp, bottom = 16.dp),
-        )
+        Column(Modifier.align(Alignment.BottomEnd).padding(end = 6.dp, bottom = 8.dp), horizontalAlignment = Alignment.End) {
+            TextButton(
+                onClick = { vm.showLog = true },
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                modifier = Modifier.height(28.dp),
+            ) { Text("app log", fontSize = 12.sp) }
+            Text(
+                "v${vm.appVersion}",
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(end = 8.dp, bottom = 8.dp),
+            )
+        }
 
         if (canNext) {
             Button(
