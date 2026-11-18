@@ -5,10 +5,14 @@ import java.io.IOException
 
 enum class Level { INFO, OK, WARN, ERROR }
 
-/** How the installer talks to the person while it works: lines of text, and the progress of the uploads. */
+/**
+ * How the installer talks to the person while it works: lines of text, the progress of the uploads, and a note each time
+ * a part ("daemon", "plugin") has really been replaced (so the app knows what the last install changed).
+ */
 class Reporter(
     val say: (String, Level) -> Unit,
     val progress: (label: String, done: Long, total: Long) -> Unit,
+    val swapped: (String) -> Unit = {},
 )
 
 /** What an install did. */
@@ -25,13 +29,16 @@ class Outcome(
  * guide (updating.md) does it by hand: stop Android Auto, never write over a file that is in use (the new file is
  * uploaded under another name and checked, the old one is renamed to .old, then the new one takes its name), make the
  * plugin folder from the new files, and keep the old ones as the way back. SSH access itself is not part of this.
+ *
+ * The SSH login has only a few commands (see [RemoteScripts]), so the work is done with those and with what the
+ * shell does itself; the files are read and written through the network paths of the other processor.
  */
 object HeadUnit {
     class Layout(val aa: String, val plugin: String?)
 
     private fun timeoutFor(bytes: Int): Long = 60_000L + bytes / 8
 
-    private fun diagnose(ssh: SshSession): String =
+    private fun diagnoseFolders(ssh: SshSession): String =
         ssh.exec(
             "echo '/opt:'; ls /opt 2>&1 | head -12; echo '/net:'; ls /net 2>&1 | head -12; " +
                 "echo 'hu-omap opt:'; ls /net/hu-omap/fs/sda0/opt 2>&1 | head -12"
@@ -42,46 +49,56 @@ object HeadUnit {
         if (aa == null) {
             throw IOException(
                 "The NBT-AAD folder (/opt/aa) was not found on the head unit. Is NBT-AAD installed?\n" +
-                    "What the SSH shell can see:\n" + diagnose(ssh)
+                    "What the SSH shell can see:\n" + diagnoseFolders(ssh)
             )
         }
         return Layout(aa, pl)
     }
 
+    private fun readStatus(ssh: SshSession, lay: Layout): UnitStatus =
+        RemoteScripts.parseStatus(lay.aa, lay.plugin, ssh.exec(RemoteScripts.status(lay.aa, lay.plugin), timeoutMs = 60_000).text)
+
     /** What is on the head unit now (read only). */
     fun status(host: String): UnitStatus =
+        SshSession(host).use { ssh -> readStatus(ssh, locate(ssh)) }
+
+    /** The commands and folders the SSH login has, as text for the person to read or send on. */
+    fun diagnose(host: String): String =
         SshSession(host).use { ssh ->
-            val lay = locate(ssh)
-            val out = ssh.exec(RemoteScripts.status(lay.aa, lay.plugin), timeoutMs = 60_000).text
-            RemoteScripts.parseStatus(lay.aa, lay.plugin, out)
+            val lay = try { locate(ssh) } catch (e: Exception) { null }
+            val r = ssh.exec(RemoteScripts.diagnose(), timeoutMs = 40_000)
+            buildString {
+                appendLine("NBT-AAD folder: ${lay?.aa ?: "not found"}")
+                appendLine("Plugin folder: ${lay?.plugin ?: "not found"}")
+                append(r.text.trim())
+                if (r.err.isNotBlank()) append("\n[errors]\n" + r.err.trim())
+            }
         }
 
     // ---- stopping Android Auto, as the guide's step 2 ----
 
-    private class Pids(val here: List<Int>, val onHuOmap: List<Int>) {
-        val any: Boolean get() = here.isNotEmpty() || onHuOmap.isNotEmpty()
-    }
-
-    private fun pidsOf(ssh: SshSession): Pids {
-        fun run(cmd: String): String = try { ssh.exec(cmd, timeoutMs = 8000).text } catch (e: Exception) { "" }
-        val here = RemoteScripts.parsePids(run("pidin 2>/dev/null | grep nbt-aad"))
-        val far = RemoteScripts.parsePids(run("on -f /net/hu-omap/ /bin/sh -c 'pidin | grep nbt-aad' 2>/dev/null"))
-        return Pids(here, far - here.toSet())
-    }
+    private fun scan(ssh: SshSession): ProcScan =
+        RemoteScripts.parseProc(try { ssh.exec(RemoteScripts.procScan(), timeoutMs = 30_000).text } catch (e: Exception) { "" })
 
     private fun stopDaemon(ssh: SshSession, rep: Reporter) {
-        var p = pidsOf(ssh)
+        var p = scan(ssh)
+        if (!p.scanned) {
+            rep.say(
+                "The app cannot see the head unit's process list, so it cannot tell whether Android Auto runs. " +
+                    "It relies on your Force Stop.",
+                Level.WARN,
+            )
+            return
+        }
         if (!p.any) {
-            rep.say("Android Auto is not running.", Level.INFO)
+            rep.say("Android Auto is not running.", Level.OK)
             return
         }
         rep.say("Android Auto is still running. Stopping it…", Level.INFO)
-        for (pid in p.here) try { ssh.exec("kill $pid", timeoutMs = 8000) } catch (e: Exception) { /* checked below */ }
-        for (pid in p.onHuOmap) {
-            try { ssh.exec("on -f /net/hu-omap/ /bin/sh -c 'kill $pid'", timeoutMs = 8000) } catch (e: Exception) { /* checked below */ }
-        }
+        for (pid in p.here) try { ssh.exec(RemoteScripts.kill(pid), timeoutMs = 10_000) } catch (e: Exception) { /* checked below */ }
+        for (pid in p.onHuOmap) try { ssh.exec(RemoteScripts.killOnHuOmap(pid), timeoutMs = 15_000) } catch (e: Exception) { /* checked below */ }
         Thread.sleep(2000)
-        p = pidsOf(ssh)
+        p = scan(ssh)
         if (p.any) {
             throw IOException(
                 "Android Auto is still running. On the head unit open Media/Radio, Android Auto and press " +
@@ -178,11 +195,21 @@ object HeadUnit {
             remountRw(ssh, rep)
             ssh.exec(RemoteScripts.cleanStaging(lay.aa))
 
+            // Everything is uploaded and checked first; nothing on the head unit changes until all of it is there.
             var done = 0L
             try {
                 if (daemon != null) {
+                    ssh.exec(RemoteScripts.stageDaemon(lay.aa))
                     upload(ssh, "${lay.aa}/nbt-aad.new", daemon, done, total, rep)
                     done += daemon.size
+                    val x = ssh.exec(RemoteScripts.makeExec(lay.aa), timeoutMs = 60_000)
+                    if (x.exit != 0) {
+                        throw IOException(
+                            "The new nbt-aad is uploaded but cannot be made executable on the head unit: its SSH " +
+                                "login has no chmod the app can use. Nothing was replaced."
+                        )
+                    }
+                    rep.say("nbt-aad is executable.", Level.OK)
                 }
                 if (plugin.isNotEmpty()) {
                     script(ssh, "Preparing the plugin files", RemoteScripts.stagePlugin(lay.aa, lay.plugin, keepOld = !pkg.fullPlugin))
@@ -204,12 +231,14 @@ object HeadUnit {
                     rep.say("Replacing nbt-aad (the old one is kept as nbt-aad.old)…", Level.INFO)
                     script(ssh, "Replacing nbt-aad", RemoteScripts.swapDaemon(lay.aa))
                     daemonDone = true
+                    rep.swapped("daemon")
                     rep.say("nbt-aad is replaced.", Level.OK)
                 }
                 if (plugin.isNotEmpty()) {
                     rep.say("Replacing the plugin folder (the old one is kept in ${lay.aa}/NbtAad.old)…", Level.INFO)
                     script(ssh, "Replacing the plugin", RemoteScripts.swapPlugin(lay.aa, lay.plugin!!))
                     pluginDone = true
+                    rep.swapped("plugin")
                     rep.say("The plugin is replaced.", Level.OK)
                 }
             } catch (e: Exception) {
@@ -217,25 +246,30 @@ object HeadUnit {
                 if (daemonDone) {
                     throw IOException(
                         "${e.message} The new nbt-aad is already in place, the old plugin is still there. " +
-                            "Use \"Go back to the previous version\" to undo it, or install again."
+                            "Use \"Go back to the previous version\" (daemon only) to undo it, or install again."
                     )
                 }
                 throw e
             }
 
             // what the head unit holds now
-            val st = try {
-                RemoteScripts.parseStatus(lay.aa, lay.plugin, ssh.exec(RemoteScripts.status(lay.aa, lay.plugin), timeoutMs = 60_000).text)
-            } catch (e: Exception) {
-                null
-            }
+            val st = try { readStatus(ssh, lay) } catch (e: Exception) { null }
             if (st != null) {
-                if (daemon != null && st.files[Names.DAEMON] != daemon.size.toLong()) {
-                    problems += "nbt-aad on the head unit has ${st.files[Names.DAEMON] ?: 0} bytes, expected ${daemon.size}."
+                if (daemon != null) {
+                    val f = st.files[Names.DAEMON]
+                    when {
+                        f == null -> problems += "nbt-aad is not in the folder after the install."
+                        !f.executable -> problems += "nbt-aad is not executable after the install."
+                        f.size >= 0 && f.size != daemon.size.toLong() ->
+                            problems += "nbt-aad on the head unit has ${f.size} bytes, expected ${daemon.size}."
+                    }
                 }
                 for (p in plugin) {
-                    if (st.pluginFiles[p.name] != p.size.toLong()) {
-                        problems += "${p.name} in the plugin folder has ${st.pluginFiles[p.name] ?: 0} bytes, expected ${p.size}."
+                    val sz = st.pluginFiles[p.name]
+                    when {
+                        sz == null -> problems += "${p.name} is not in the plugin folder after the install."
+                        sz >= 0 && sz != p.size.toLong() ->
+                            problems += "${p.name} in the plugin folder has $sz bytes, expected ${p.size}."
                     }
                 }
             } else {
@@ -249,22 +283,27 @@ object HeadUnit {
                     Level.INFO,
                 )
             }
-            Outcome(daemonDone, pluginDone, skipped, st?.version ?: daemon?.let { BuildPackage.findVersion(it.bytes) }, problems)
+            Outcome(daemonDone, pluginDone, skipped, daemon?.let { BuildPackage.findVersion(it.bytes) } ?: st?.version, problems)
         }
     }
 
     // ---- the way back ----
 
-    /** Swaps the current version with the one the last install moved aside (doing it again swaps back). */
-    fun revert(host: String, rep: Reporter): Outcome {
+    /**
+     * Swaps the current version with the one the last install moved aside (doing it again swaps back). The daemon and
+     * the plugin are chosen separately: a failed install may have changed only one of them.
+     */
+    fun revert(host: String, rep: Reporter, daemon: Boolean, plugin: Boolean): Outcome {
         rep.say("Logging in to $host…", Level.INFO)
         return SshSession(host).use { ssh ->
             val lay = locate(ssh)
-            val before = RemoteScripts.parseStatus(lay.aa, lay.plugin, ssh.exec(RemoteScripts.status(lay.aa, lay.plugin), timeoutMs = 60_000).text)
-            val doDaemon = before.hasPreviousDaemon
-            val doPlugin = before.hasOldPlugin && lay.plugin != null
+            val before = readStatus(ssh, lay)
+            val doDaemon = daemon && before.hasPreviousDaemon
+            val doPlugin = plugin && before.hasOldPlugin && lay.plugin != null
             if (!doDaemon && !doPlugin) {
-                throw IOException("There is no previous version on the head unit (no nbt-aad.old or NbtAad.old in ${lay.aa}).")
+                throw IOException(
+                    "There is nothing to swap back for what you chose (no nbt-aad.old or NbtAad.old in ${lay.aa})."
+                )
             }
             stopDaemon(ssh, rep)
             remountRw(ssh, rep)
@@ -273,17 +312,18 @@ object HeadUnit {
             if (doDaemon) {
                 script(ssh, "Going back to the previous nbt-aad", RemoteScripts.revertDaemon(lay.aa))
                 d = true
+                rep.swapped("daemon")
                 rep.say("nbt-aad is swapped with nbt-aad.old.", Level.OK)
             }
             if (doPlugin) {
                 script(ssh, "Going back to the previous plugin", RemoteScripts.revertPlugin(lay.aa, lay.plugin!!))
                 p = true
+                rep.swapped("plugin")
                 rep.say("The plugin folder is swapped with NbtAad.old.", Level.OK)
             }
-            val after = try {
-                RemoteScripts.parseStatus(lay.aa, lay.plugin, ssh.exec(RemoteScripts.status(lay.aa, lay.plugin), timeoutMs = 60_000).text)
-            } catch (e: Exception) {
-                null
+            val after = try { readStatus(ssh, lay) } catch (e: Exception) { null }
+            if (after != null && d && after.daemonBroken) {
+                rep.say("The nbt-aad that is in place now is not executable. Swap it again or install a release.", Level.WARN)
             }
             Outcome(d, p, emptyList(), after?.version, emptyList())
         }

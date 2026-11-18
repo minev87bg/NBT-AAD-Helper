@@ -74,7 +74,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     var screen by mutableStateOf(Screen.DETECT)
 
-    /** The "Try new things" screen: releases, files, what is on the head unit, install and go back. */
+    /** The "Install / update NBT Android Auto" screen: releases, files, what is on the head unit, install and go back. */
     val inst = InstallController(ctx, viewModelScope) { detect.hu }
     var themeMode by mutableStateOf(themePrefs.read())
 
@@ -409,7 +409,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (storage.hasDraft(carId)) askDraft = true else openOptions(useDraft = false)
     }
 
-    /** "Try new things": releases, files from the phone, install and the way back. */
+    /** "Install / update": releases, files from the phone, install and the way back. */
     fun chooseInstall() {
         inst.open()
         screen = Screen.INSTALL

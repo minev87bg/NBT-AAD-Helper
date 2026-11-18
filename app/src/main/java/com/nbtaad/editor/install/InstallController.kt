@@ -31,7 +31,7 @@ class RunLine(val text: String, val level: Level)
 class RunState(val kind: RunKind, val lines: List<RunLine>, val status: RunStatus)
 
 /**
- * The state behind the "Try new things" screen: the project's releases, the files chosen, what is on the head unit,
+ * The state behind the "Install / update NBT Android Auto" screen: the project's releases, the files chosen, what is on the head unit,
  * and the install / go-back runs. The work happens on background threads; the screen reads these properties.
  */
 class InstallController(
@@ -60,6 +60,10 @@ class InstallController(
     // dialogs and the job
     var askInstall by mutableStateOf(false)
     var askRevert by mutableStateOf(false)
+    var revertDaemon by mutableStateOf(true)
+    var revertPlugin by mutableStateOf(false)
+    var diagText by mutableStateOf<String?>(null)
+    var diagBusy by mutableStateOf(false)
     var job by mutableStateOf<RunState?>(null)
     var liveLabel by mutableStateOf<String?>(null)
     var liveFraction by mutableStateOf<Float?>(null)
@@ -199,13 +203,70 @@ class InstallController(
 
     // ---------------- install and go back ----------------
 
-    private fun reporter() = Reporter(
+    private fun reporter(recording: Boolean) = Reporter(
         say = { text, level -> addLine(text, level) },
         progress = { label, done, total ->
             liveLabel = label
             liveFraction = if (total > 0) (done.toFloat() / total).coerceIn(0f, 1f) else null
         },
+        swapped = { what -> if (recording) record(what) },
     )
+
+    // What the last install changed, so "go back" offers the right parts: it is written when a part is really replaced.
+    private val prefs = ctx.getSharedPreferences("install_state", Context.MODE_PRIVATE)
+    private var recStarted = false
+
+    private fun record(what: String) {
+        val e = prefs.edit()
+        if (!recStarted) {
+            recStarted = true
+            e.putBoolean("daemon", false).putBoolean("plugin", false)
+        }
+        e.putBoolean(what, true).apply()
+    }
+
+    /** (daemon, plugin) as the last install changed them, or null when none is recorded. */
+    private fun lastInstall(): Pair<Boolean, Boolean>? =
+        if (prefs.contains("daemon") || prefs.contains("plugin")) prefs.getBoolean("daemon", false) to prefs.getBoolean("plugin", false)
+        else null
+
+    /** Opens the "go back" question with the parts that the last install changed ticked. */
+    fun openRevert() {
+        val u = unit
+        val canD = u?.hasPreviousDaemon ?: true
+        val canP = u?.hasOldPlugin ?: true
+        val rec = lastInstall()
+        if (rec != null) {
+            revertDaemon = rec.first && canD
+            revertPlugin = rec.second && canP
+        } else {
+            // nothing recorded (an install of an older version of this app): the daemon only, the plugin is chosen by hand
+            revertDaemon = canD
+            revertPlugin = false
+        }
+        if (!revertDaemon && !revertPlugin) {
+            revertDaemon = canD
+            revertPlugin = !canD && canP
+        }
+        askRevert = true
+    }
+
+    fun diagnose() {
+        val hu = host() ?: return
+        if (diagBusy) return
+        diagBusy = true
+        diagText = "Asking the head unit…"
+        scope.launch(Dispatchers.IO) {
+            try {
+                NetworkBinder.bindToLocalNetwork(ctx)
+                diagText = HeadUnit.diagnose(hu)
+            } catch (e: Exception) {
+                diagText = "Could not ask the head unit: ${friendlyError(e)}"
+            } finally {
+                diagBusy = false
+            }
+        }
+    }
 
     private fun addLine(text: String, level: Level) {
         synchronized(this) { job = job?.let { it.copy2(it.lines + RunLine(text, level)) } }
@@ -224,11 +285,12 @@ class InstallController(
         val hu = host() ?: return
         if (working) return
         askInstall = false
+        recStarted = false
         job = RunState(RunKind.INSTALL, emptyList(), RunStatus.RUNNING)
         scope.launch(Dispatchers.IO) {
             try {
                 NetworkBinder.bindToLocalNetwork(ctx)
-                val out = HeadUnit.install(hu, v.pkg, reporter())
+                val out = HeadUnit.install(hu, v.pkg, reporter(recording = true))
                 val what = listOfNotNull(
                     if (out.daemon) "nbt-aad" else null,
                     if (out.plugin) "the plugin" else null,
@@ -248,12 +310,14 @@ class InstallController(
     fun revert() {
         val hu = host() ?: return
         if (working) return
+        val wantDaemon = revertDaemon
+        val wantPlugin = revertPlugin
         askRevert = false
         job = RunState(RunKind.REVERT, emptyList(), RunStatus.RUNNING)
         scope.launch(Dispatchers.IO) {
             try {
                 NetworkBinder.bindToLocalNetwork(ctx)
-                val out = HeadUnit.revert(hu, reporter())
+                val out = HeadUnit.revert(hu, reporter(recording = false), wantDaemon, wantPlugin)
                 val what = listOfNotNull(
                     if (out.daemon) "nbt-aad" else null,
                     if (out.plugin) "the plugin" else null,

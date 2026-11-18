@@ -252,14 +252,17 @@ class InstallLogicTest {
 
     @Test
     fun theStatusIsReadFromTheScriptOutput() {
-        val out = "F nbt-aad    8421376\nF nbt-aad.old 8000000\nOLDPLUGIN\nL libNbtAad.so   1234\nL NbtAad.xml 5\n" +
+        val out = "F nbt-aad x 8421376\nF nbt-aad.old - 8000000\nOLDPLUGIN\nL libNbtAad.so 1234\nL NbtAad.xml 5\n" +
             "NBT-AAD-VERSION=v1.9.91-x\n"
         val s = RemoteScripts.parseStatus("/opt/aa", "/p", out)
         assertTrue(s.hasDaemon)
         assertTrue(s.hasPreviousDaemon)
         assertTrue(s.hasOldPlugin)
         assertTrue(s.hasPrevious)
-        assertEquals(8421376L, s.files["nbt-aad"])
+        assertEquals(8421376L, s.files.getValue("nbt-aad").size)
+        assertTrue(s.files.getValue("nbt-aad").executable)
+        assertFalse(s.files.getValue("nbt-aad.old").executable)
+        assertFalse(s.daemonBroken)
         assertEquals(2, s.pluginFiles.size)
         assertEquals("v1.9.91-x", s.version)
         val none = RemoteScripts.parseStatus("/opt/aa", null, "")
@@ -269,10 +272,60 @@ class InstallLogicTest {
     }
 
     @Test
-    fun theDaemonProcessIsFoundInPidinOutput() {
-        val out = "    19320   1 usr/aa/nbt-aad   10r RECEIVE 1\n  7 1 other 10r\n  88 1 grep nbt-aad\n"
-        assertEquals(listOf(19320), RemoteScripts.parsePids(out))
-        assertEquals(emptyList<Int>(), RemoteScripts.parsePids(""))
+    fun aHeadUnitWithoutWcStillShowsItsFiles() {
+        // the car's SSH login has no wc: the sizes are empty, the files must still be listed
+        val out = "F nbt-aad x \nF nbt-aad.old x \nL libNbtAad.so \nL NbtAad.xml \n"
+        val s = RemoteScripts.parseStatus("/opt/aa", "/p", out)
+        assertTrue(s.hasDaemon)
+        assertEquals(-1L, s.files.getValue("nbt-aad").size)
+        assertTrue(s.hasPreviousDaemon)
+        assertEquals(listOf("libNbtAad.so", "NbtAad.xml"), s.pluginFiles.keys.toList())
+        assertEquals(-1L, s.pluginFiles.getValue("NbtAad.xml"))
+    }
+
+    @Test
+    fun aDaemonThatCannotBeRunIsReported() {
+        val s = RemoteScripts.parseStatus("/opt/aa", "/p", "F nbt-aad - 100\nF nbt-aad.old x 100\n")
+        assertTrue(s.daemonBroken)
+        assertTrue(s.hasPreviousDaemon)
+    }
+
+    @Test
+    fun theDaemonProcessIsFoundInTheProcessScan() {
+        val out = "SCAN /proc\nSCAN /net/hu-omap/proc\nPID /net/hu-omap/proc 19320\nPID /proc 77\nPID /proc 77\n"
+        val p = RemoteScripts.parseProc(out)
+        assertTrue(p.scanned)
+        assertTrue(p.any)
+        assertEquals(listOf(77), p.here)
+        assertEquals(listOf(19320), p.onHuOmap)
+        val none = RemoteScripts.parseProc("SCAN /proc\n")
+        assertTrue(none.scanned)
+        assertFalse(none.any)
+        assertFalse(RemoteScripts.parseProc("").scanned)
+    }
+
+    @Test
+    fun pathsAreTranslatedForTheOtherProcessor() {
+        assertEquals("/fs/sda0/opt/aa", RemoteScripts.onHuOmapPath("/net/hu-omap/fs/sda0/opt/aa"))
+        assertEquals("/opt/aa", RemoteScripts.onHuOmapPath("/opt/aa"))
+        assertEquals("/opt/aa", RemoteScripts.onHuOmapPath("/net/hu-omap/opt/aa"))
+    }
+
+    @Test
+    fun theScriptsUseOnlyTheCommandsTheCarHas() {
+        // cat, cp, mv, rm, mkdir and the shell itself; the others only as optional extras, never to decide anything
+        val needed = listOf(
+            RemoteScripts.swapDaemon("/opt/aa"), RemoteScripts.swapPlugin("/opt/aa", "/p"),
+            RemoteScripts.revertDaemon("/opt/aa"), RemoteScripts.revertPlugin("/opt/aa", "/p"),
+            RemoteScripts.stagePlugin("/opt/aa", "/p", true), RemoteScripts.procScan(), RemoteScripts.locate(),
+        )
+        for (sc in needed) {
+            for (bad in listOf("wc ", "cksum", "basename", "pidin", "ls ", "head", "sleep")) {
+                assertFalse("$bad in:\n$sc", sc.lines().any { !it.trimStart().startsWith("PATH=") && it.contains(bad) })
+            }
+        }
+        assertTrue(RemoteScripts.swapDaemon("/opt/aa").startsWith("PATH="))
+        assertFalse(RemoteScripts.swapDaemon("/opt/aa").contains("\u00A4"))
     }
 
     // ---- releases ----

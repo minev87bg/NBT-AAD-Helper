@@ -20,6 +20,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -59,17 +61,25 @@ fun HubScreen(vm: MainViewModel) {
         )
         Spacer(Modifier.height(24.dp))
         HubCard(
-            "Change a setting",
+            "CHANGE A SETTING",
             "Edit nbt-aad.env on the head unit: every setting of the daemon, what it does, and which are applied now.",
         ) { vm.chooseSettings() }
         HubCard(
-            "Try new things",
-            "Install a release from Sq00ky's Releases page, or a build from a file on this phone. The previous version " +
-                "stays on the head unit and one button goes back to it.",
+            "INSTALL / UPDATE\nNBT ANDROID AUTO",
+            "Install or update the Android Auto daemon and plugin on the head unit, from Sq00ky's Releases page or " +
+                "from a file on this phone. The previous version stays on the head unit and one button goes back to it.",
+            highlight = true,
         ) { vm.chooseInstall() }
         HubCard(
-            "Contribute",
-            "Browse the open issues and pull requests and send logs from the head unit. Coming in the next version.",
+            "EXPERIMENTAL",
+            "Browse the open issues and pull requests of the project, scan them for files and try new builds. " +
+                "Coming in the next version.",
+            enabled = false,
+        ) {}
+        HubCard(
+            "CONTRIBUTE",
+            "Pick log files from the head unit, pack them into a zip and open the issue page in your browser to send " +
+                "them. Coming in a later version.",
             enabled = false,
         ) {}
         Spacer(Modifier.height(24.dp))
@@ -79,12 +89,20 @@ fun HubScreen(vm: MainViewModel) {
 }
 
 @Composable
-private fun HubCard(title: String, text: String, enabled: Boolean = true, onClick: () -> Unit) {
-    Card(onClick = onClick, enabled = enabled, modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+private fun HubCard(title: String, text: String, enabled: Boolean = true, highlight: Boolean = false, onClick: () -> Unit) {
+    Card(
+        onClick = onClick,
+        enabled = enabled,
+        colors = if (highlight) CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer,
+            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        ) else CardDefaults.cardColors(),
+        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+    ) {
         Column(Modifier.padding(16.dp)) {
             Text(title, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(4.dp))
-            Text(text, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(text, fontSize = 13.sp, color = if (highlight) Color.Unspecified else MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -106,7 +124,7 @@ private fun DraftDialog(vm: MainViewModel) {
 }
 
 // =========================================================================
-// Try new things
+// Install / update NBT Android Auto
 // =========================================================================
 
 @Composable
@@ -123,11 +141,12 @@ fun InstallScreen(vm: MainViewModel) {
         item(key = "__head") {
             Column(Modifier.fillMaxWidth()) {
                 Spacer(Modifier.height(52.dp))
-                Text("Try new things", fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+                Text("Install / update NBT Android Auto", fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(4.dp))
                 Text(
                     "Install a release or a build, then restart the head unit. Nothing is thrown away: the version " +
-                        "that was on the head unit stays there, and one button goes back to it.",
+                        "that was on the head unit stays there, and one button goes back to it. Your settings " +
+                        "(nbt-aad.env) are not touched.",
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -179,7 +198,7 @@ fun InstallScreen(vm: MainViewModel) {
                 )
                 Spacer(Modifier.height(8.dp))
                 OutlinedButton(
-                    onClick = { inst.askRevert = true },
+                    onClick = { inst.openRevert() },
                     enabled = !inst.working && inst.unit?.hasPrevious != false,
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("Go back to the previous version") }
@@ -198,6 +217,7 @@ fun InstallScreen(vm: MainViewModel) {
     inst.view?.takeIf { inst.askInstall }?.let { PlanDialog(inst, it) }
     if (inst.askRevert) RevertDialog(inst)
     inst.job?.let { RunDialog(inst, it) }
+    inst.diagText?.let { DiagDialog(inst, it) }
 }
 
 @Composable
@@ -221,20 +241,39 @@ private fun UnitCard(inst: InstallController) {
                 u != null -> UnitLines(u)
                 else -> Text("Not read yet.", fontSize = 12.sp)
             }
-            TextButton(onClick = { inst.readUnit() }, enabled = !inst.working) { Text("CHECK AGAIN", fontSize = 12.sp) }
+            Row {
+                TextButton(onClick = { inst.readUnit() }, enabled = !inst.working) { Text("CHECK AGAIN", fontSize = 12.sp) }
+                TextButton(onClick = { inst.diagnose() }, enabled = !inst.working && !inst.diagBusy) {
+                    Text("TOOLS CHECK", fontSize = 12.sp)
+                }
+            }
         }
     }
 }
 
 @Composable
 private fun UnitLines(u: UnitStatus) {
-    val size = u.files[Names.DAEMON]
+    val d = u.files[Names.DAEMON]
     Text("Folder: ${u.aaDir}", fontSize = 12.sp, fontFamily = FontFamily.Monospace)
     Text(
-        if (size != null) "Daemon: nbt-aad, ${ReleaseLogic.mb(size)}" + (u.version?.let { ", $it" } ?: "")
-        else "Daemon: nbt-aad not found in that folder",
+        if (d == null) "Daemon: nbt-aad not found in that folder"
+        else "Daemon: nbt-aad" + (if (d.size >= 0) ", ${ReleaseLogic.mb(d.size)}" else "") +
+            (u.version?.let { ", $it" } ?: "") + (if (d.executable) "" else ", NOT executable"),
         fontSize = 12.sp,
+        color = if (d != null && !d.executable) Red else Color.Unspecified,
     )
+    if (u.daemonBroken) {
+        Text(
+            "Android Auto cannot start with this nbt-aad: the head unit cannot run it (an install that stopped halfway?)." +
+                if (u.hasPreviousDaemon) {
+                    " The previous daemon is kept as nbt-aad.old: use \"Go back to the previous version\" and tick only the daemon."
+                } else {
+                    " Install a release to repair it."
+                },
+            fontSize = 12.sp,
+            color = Red,
+        )
+    }
     Text(
         if (u.pluginDir != null) "Plugin: ${u.pluginFiles.size} file${if (u.pluginFiles.size == 1) "" else "s"} in its folder"
         else "Plugin folder: not found",
@@ -368,10 +407,15 @@ private fun PackageCard(inst: InstallController, v: PackageView) {
 // ---------------------------------------------------------------- dialogs
 
 @Composable
-private fun CheckLine(checked: Boolean, onChange: (Boolean) -> Unit, text: String) {
+private fun CheckLine(checked: Boolean, onChange: (Boolean) -> Unit, text: String, enabled: Boolean = true) {
     Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.Top) {
-        Checkbox(checked = checked, onCheckedChange = onChange)
-        Text(text, fontSize = 13.sp, modifier = Modifier.padding(top = 12.dp))
+        Checkbox(checked = checked, onCheckedChange = onChange, enabled = enabled)
+        Text(
+            text,
+            fontSize = 13.sp,
+            color = if (enabled) Color.Unspecified else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 12.dp),
+        )
     }
 }
 
@@ -460,16 +504,37 @@ private fun PlanDialog(inst: InstallController, v: PackageView) {
 @Composable
 private fun RevertDialog(inst: InstallController) {
     var stopped by remember { mutableStateOf(false) }
+    val u = inst.unit
+    val canD = u?.hasPreviousDaemon ?: true
+    val canP = u?.hasOldPlugin ?: true
+    val chosen = (inst.revertDaemon && canD) || (inst.revertPlugin && canP)
     AlertDialog(
         onDismissRequest = { inst.askRevert = false },
         title = { Text("Go back to the previous version?") },
         text = {
-            Column(Modifier.verticalScroll(rememberScrollState())) {
+            Column(Modifier.heightIn(max = 440.dp).verticalScroll(rememberScrollState())) {
                 Text(
-                    "The current nbt-aad and plugin folder are swapped with the previous ones that the last install " +
-                        "kept on the head unit (nbt-aad.old and NbtAad.old). Doing it again goes forward again. " +
-                        "Your nbt-aad.env is not touched.",
+                    "Choose what is swapped with the previous version that an install kept on the head unit. Doing it " +
+                        "again goes forward again. Your nbt-aad.env is not touched.",
                     fontSize = 13.sp,
+                )
+                if (u?.daemonBroken == true) {
+                    Text(
+                        "The nbt-aad on the head unit now cannot be run: swapping the daemon back repairs Android Auto.",
+                        fontSize = 12.sp,
+                        color = Red,
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
+                }
+                CheckLine(
+                    inst.revertDaemon && canD, { inst.revertDaemon = it },
+                    "The daemon: nbt-aad is swapped with nbt-aad.old" + if (canD) "" else " (there is no nbt-aad.old)",
+                    enabled = canD,
+                )
+                CheckLine(
+                    inst.revertPlugin && canP, { inst.revertPlugin = it },
+                    "The plugin: the plugin folder is swapped with NbtAad.old" + if (canP) "" else " (there is no NbtAad.old)",
+                    enabled = canP,
                 )
                 CheckLine(
                     stopped, { stopped = it },
@@ -477,8 +542,25 @@ private fun RevertDialog(inst: InstallController) {
                 )
             }
         },
-        confirmButton = { TextButton(onClick = { inst.revert() }, enabled = stopped) { Text("Go back") } },
+        confirmButton = { TextButton(onClick = { inst.revert() }, enabled = stopped && chosen) { Text("Go back") } },
         dismissButton = { TextButton(onClick = { inst.askRevert = false }) { Text("Cancel") } },
+    )
+}
+
+@Composable
+private fun DiagDialog(inst: InstallController, text: String) {
+    val clip = LocalClipboardManager.current
+    AlertDialog(
+        onDismissRequest = { if (!inst.diagBusy) inst.diagText = null },
+        title = { Text("What the head unit's SSH login has") },
+        text = {
+            Column(Modifier.heightIn(max = 380.dp).verticalScroll(rememberScrollState())) {
+                Text(text, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                if (inst.diagBusy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp))
+            }
+        },
+        confirmButton = { TextButton(onClick = { inst.diagText = null }, enabled = !inst.diagBusy) { Text("Close") } },
+        dismissButton = { TextButton(onClick = { clip.setText(AnnotatedString(text)) }) { Text("Copy") } },
     )
 }
 

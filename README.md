@@ -3,7 +3,7 @@
 Android app that edits `/opt/aa/nbt-aad.env` on a BMW / Toyota Supra NBT Evo head unit running
 [NBT-AAD](https://github.com/Sq00ky/Supra-iDrive6-Android-Auto) (native Android Auto).
 
-Status: tested in a car for detection, reset, read and save. The settings list is new, and "Try new things" (the installer) has not been tried in a car yet.
+Status: tested in a car for detection, reset, read and save. The installer ("Install / update NBT Android Auto") failed its first car test because the head unit's SSH login has no `chmod`, `wc` or `cksum`; version 1.0.13 is built for that and has not been tried in a car yet. EXPERIMENTAL and CONTRIBUTE are announced but not built.
 
 ## Get the APK
 Every successful build is published as a release (Releases page, newest on top, `NBT-AAD-Helper-v1.0.N.apk`).
@@ -30,12 +30,13 @@ once, then install a release. From then on updates install over the existing app
 ## Use
 1. Open the app with internet (mobile data, or a WiFi repeater with internet). It checks the project's
    README for new settings and says "Available settings are synchronized"; the list is kept on the phone, and a
-   copy is built into the app. Internet is also needed for the app's own updates and for "Try new things" (the
-   releases list and the downloads).
+   copy is built into the app. Internet is also needed for the app's own updates and for the releases list and
+   downloads of the installer.
 2. Phone hotspot on, WiFi dongle connected to it (or Ethernet with OTG), car on (ignition / key on).
 3. DETECT CAR. If the dot is red, use "Reset head unit" (no SSH needed) and wait for green.
-4. NEXT opens the page where you choose what to do: **Change a setting**, **Try new things**, or **Contribute**
-   (coming in a later version).
+4. NEXT opens the page where you choose what to do, four buttons: **CHANGE A SETTING**, **INSTALL / UPDATE NBT
+   ANDROID AUTO**, **EXPERIMENTAL** (browse issues and pull requests, scan them for files; coming next) and
+   **CONTRIBUTE** (pick log files from the head unit, zip them, open the issue page in the browser; coming later).
 
 ### Change a setting
 Every documented setting is listed. READ OPTIONS marks the ones the head unit applies right now
@@ -45,7 +46,7 @@ A setting that the list does not have yet (from a newer or experimental build) i
 list), whatever the settings sync brings, and "Remove from list" takes it out again.
 Then restart the Android Auto Daemon from the head unit (Media/Radio > Android Auto > Force Stop).
 
-### Try new things (install a version)
+### Install / update NBT Android Auto
 Installs NBT-AAD files on the head unit from the phone, over the SSH login the app already has (the app does not
 open SSH itself). It does by program what Sq00ky's `updating.md` does by hand with a USB stick:
 
@@ -61,8 +62,13 @@ open SSH itself). It does by program what Sq00ky's `updating.md` does by hand wi
   `/opt/aa/NbtAad.old`, never left inside `Plugins`), and the new one takes its place. Nothing is overwritten while it
   is in use. `nbt-aad.env` is not touched. `pf_aa` is not installed: the firewall rules are built into `nbt-aad`.
 - Afterwards you restart the head unit (hold the power button 30 seconds), as the update guide says.
-- "Go back to the previous version" swaps the current files with the `.old` ones; pressing it again goes forward.
-  To return to an official version, install it from the releases list.
+- "Go back to the previous version" swaps the daemon and/or the plugin with the `.old` ones (you tick which);
+  pressing it again goes forward. To return to an official version, install it from the releases list.
+- The SSH login of the head unit has only a few commands (`cat`, `cp`, `mv`, `rm`, `mkdir` and the shell itself).
+  The scripts use only those: the new daemon is made by copying a program that is already executable and writing the
+  file into the copy, so no `chmod` is needed, and the swap is refused if the new file is not executable. If an
+  `nbt-aad` cannot be run (an install that stopped halfway), the card says so in red and "Go back" repairs it.
+  "TOOLS CHECK" shows which commands the login has and can be copied to be sent along with a bug report.
 
 `nbt-aad.env` is optional and only overrides the daemon's defaults, so the app writes only the settings you
 switch on. Limits of the loader on the head unit, checked before every upload: at most 15 settings, at most
