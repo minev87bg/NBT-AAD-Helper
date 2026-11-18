@@ -25,6 +25,7 @@ import com.nbtaad.editor.net.EnvRemote
 import com.nbtaad.editor.net.Hsfz
 import com.nbtaad.editor.net.NetworkBinder
 import com.nbtaad.editor.net.friendlyError
+import com.nbtaad.editor.net.runOnHeadUnit
 import com.nbtaad.editor.update.Check
 import com.nbtaad.editor.update.InstallEvents
 import com.nbtaad.editor.update.UpdateOffer
@@ -75,7 +76,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     var screen by mutableStateOf(Screen.DETECT)
 
     /** The "Install / update NBT Android Auto" screen: releases, files, what is on the head unit, install and go back. */
-    val inst = InstallController(ctx, viewModelScope) { detect.hu }
+    val inst = InstallController(ctx, viewModelScope, host = { detect.hu }, rescan = { rescanForHost() })
     var themeMode by mutableStateOf(themePrefs.read())
 
     fun cycleTheme() {
@@ -363,39 +364,45 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * Reset the head unit through the ZGW (no SSH), then keep checking until SSH opens. [fromWindow]: it was started from
-     * a result window, which shows the progress as [resetNote] instead of the feedback line of the first screen.
+     * Reset the head unit through the ZGW (no SSH), then keep checking until SSH opens. The car is scanned again first,
+     * as DETECT CAR does, so the reset goes to the gateway as it is now (the addresses of an earlier scan may be old);
+     * only when the scan finds nothing, the address that was known is tried. [fromWindow]: it was started from a result
+     * window, which shows the progress as [resetNote] instead of the feedback line of the first screen.
      */
     fun resetHeadUnit(fromWindow: Boolean = false) {
-        val zgw = detect.zgw ?: return
-        if (detect.vin == null) return // only a gateway that gave a VIN is treated as a car
         confirmReset = false
         pollJob?.cancel()
         resetting = true
         feedbackError = false
-        resetNote = if (fromWindow) "Sending the reset command…" else null
+        resetNote = if (fromWindow) "Looking for the car…" else null
         fun note(text: String) { if (resetNote != null) resetNote = text }
-        feedback = "Sending the reset command to the head unit…"
+        feedback = "Looking for the car…"
         pollJob = viewModelScope.launch(Dispatchers.IO) {
             try {
                 NetworkBinder.bindToLocalNetwork(ctx)
-                var res = Hsfz.resetHeadUnit(zgw)
+                val scan = CarDetector.detect { if (!fromWindow) feedback = it }
+                var gw = detect.zgw
+                if (scan.zgwIp != null) {
+                    gw = scan.zgwIp
+                    detect = detect.copy(
+                        carFound = true, zgw = scan.zgwIp, vin = scan.vin ?: detect.vin,
+                        hu = scan.huIp ?: detect.hu, ssh = scan.sshOpen,
+                    )
+                }
+                if (gw == null) {
+                    val text = scan.problem ?: "No car detected."
+                    feedbackError = true
+                    feedback = text
+                    note(text)
+                    return@launch
+                }
+                feedback = "Sending the reset command to the head unit…"
+                note("Sending the reset command…")
+                var res = Hsfz.resetHeadUnit(gw)
                 if (res.unreachable) {
-                    // The addresses of the last scan may be old (the hotspot hands out new ones when the dongle joins
-                    // again) or the gateway was busy: look for it again, as DETECT CAR does, and try once more.
-                    feedback = "The gateway did not answer. Looking for it again…"
-                    note("The gateway did not answer. Looking for it again…")
-                    val ident = CarDetector.discoverZgw(CarDetector.localNetworks())
-                    var gw = zgw
-                    if (ident != null && ident.vin != null) {
-                        gw = ident.ip
-                        detect = detect.copy(zgw = ident.ip, vin = ident.vin)
-                    }
+                    note("The gateway did not answer. Trying again…")
+                    delay(3000)
                     res = Hsfz.resetHeadUnit(gw)
-                    if (res.unreachable) {
-                        delay(3000)
-                        res = Hsfz.resetHeadUnit(gw)
-                    }
                 }
                 val msg = res.message
                 if (!res.ok) {
@@ -413,7 +420,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     note("The head unit is restarting… (${waited}s)")
                     delay(5000)
                     waited += 5
-                    val (hu, open) = CarDetector.findHeadUnit(CarDetector.localNetworks(), zgw)
+                    val (hu, open) = CarDetector.findHeadUnit(CarDetector.localNetworks(), gw)
                     if (hu != null) detect = detect.copy(hu = hu, ssh = open)
                     if (open) {
                         feedback = "Head unit is back and SSH is open. Press NEXT."
@@ -432,6 +439,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 resetting = false
             }
         }
+    }
+
+    /** Looks for the car again (what DETECT CAR does); returns the head unit's address when SSH answers there. */
+    private fun rescanForHost(): String? {
+        NetworkBinder.bindToLocalNetwork(ctx)
+        val r = CarDetector.detect { }
+        applyResult(r)
+        return if (r.sshOpen) r.huIp else null
     }
 
     // =====================================================================
@@ -646,15 +661,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun readOptions() {
-        val hu = detect.hu ?: return
-        if (optBusy) return
+        if (detect.hu == null || optBusy) return
         optBusy = true
         optError = false
         optFeedback = "Connecting…"
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 NetworkBinder.bindToLocalNetwork(ctx)
-                when (val res = EnvRemote.read(hu) { optFeedback = it }) {
+                val found = runOnHeadUnit(
+                    { detect.hu }, { rescanForHost() },
+                    onRescan = { optFeedback = "No connection. Looking for the car again…" },
+                ) { hu -> EnvRemote.read(hu) { optFeedback = it } }
+                when (val res = found) {
                     is EnvRemote.ReadResult.Found -> {
                         storage.saveFromCar(carId, res.text)
                         storage.clearDraft(carId)
@@ -708,14 +726,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun save() {
-        val hu = detect.hu ?: return
+        if (detect.hu == null) return
         val text = renderCurrent() ?: return
         storage.saveDraft(carId, text)
         saveDialog = SaveDialogState(listOf(DialogLine("Preparing ${text.length} bytes…")), SaveStatus.RUNNING)
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 NetworkBinder.bindToLocalNetwork(ctx)
-                EnvRemote.write(hu, text.toByteArray(Charsets.UTF_8)) { addLine(DialogLine(it)) }
+                runOnHeadUnit(
+                    { detect.hu }, { rescanForHost() },
+                    onRescan = { addLine(DialogLine("No connection. Looking for the car again…")) },
+                ) { hu -> EnvRemote.write(hu, text.toByteArray(Charsets.UTF_8)) { addLine(DialogLine(it)) } }
                 storage.saveUploaded(carId, text)
                 storage.clearDraft(carId)
                 storage.saveFromCar(carId, text)

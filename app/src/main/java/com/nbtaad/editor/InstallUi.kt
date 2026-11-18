@@ -3,8 +3,10 @@ package com.nbtaad.editor
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -17,8 +19,15 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalConfiguration
@@ -62,56 +71,188 @@ fun HubScreen(vm: MainViewModel) {
             fontSize = 12.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Spacer(Modifier.height(24.dp))
-        HubCard(
-            "CHANGE A SETTING",
-            "Edit nbt-aad.env on the head unit: every setting of the daemon, what it does, and which are applied now.",
-        ) { vm.chooseSettings() }
-        HubCard(
-            "INSTALL / UPDATE\nNBT ANDROID AUTO",
-            "Install or update the Android Auto daemon and plugin on the head unit, from Sq00ky's Releases page or " +
-                "from a file on this phone. The previous version stays on the head unit and one button goes back to it.",
-            highlight = true,
+        Spacer(Modifier.height(28.dp))
+        HeroTile(
+            title = "Install / update",
+            subtitle = "NBT Android Auto",
+            info = "Install or update the Android Auto daemon and plugin on the head unit, from Sq00ky's Releases page " +
+                "or from a file on this phone. The previous version stays on the head unit and one button goes back to it.",
         ) { vm.chooseInstall() }
-        HubCard(
-            "EXPERIMENTAL",
-            "Browse the open issues and pull requests of the project, scan them for files and try new builds. " +
-                "Coming in the next version.",
-            enabled = false,
-        ) {}
-        HubCard(
-            "CONTRIBUTE",
-            "Pick log files from the head unit, pack them into a zip and open the issue page in your browser to send " +
-                "them. Coming in a later version.",
-            enabled = false,
-        ) {}
+        Spacer(Modifier.height(12.dp))
+        WideTile(
+            icon = HubIcon.SETTINGS,
+            tint = Color(0xFF5B93F0),
+            title = "Change a setting",
+            subtitle = "Edit nbt-aad.env",
+            info = "Edit nbt-aad.env on the head unit: every setting of the daemon, what it does, and which are applied now.",
+        ) { vm.chooseSettings() }
+        Spacer(Modifier.height(12.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            SoonTile(
+                icon = HubIcon.FLASK,
+                tint = Color(0xFFE9A33A),
+                title = "Experimental",
+                info = "Browse the open issues and pull requests of the project, scan them for files and try new builds. " +
+                    "Coming in the next version.",
+                modifier = Modifier.weight(1f),
+            )
+            SoonTile(
+                icon = HubIcon.HEART,
+                tint = Color(0xFFE56B94),
+                title = "Contribute",
+                info = "Pick log files from the head unit, pack them into a zip and open the issue page in your browser " +
+                    "to send them. Coming in a later version.",
+                modifier = Modifier.weight(1f),
+            )
+        }
         Spacer(Modifier.height(24.dp))
     }
 
     if (vm.askDraft) DraftDialog(vm)
 }
 
-/** A choice on page 2: the name on the left, an (i) on the right that opens what it is for. */
+private val HeroText = Color(0xFF0C2200)
+private val TileShape = RoundedCornerShape(26.dp)
+
+/** The main choice: a big green tile. The (i) in its corner opens what it is for. */
 @Composable
-private fun HubCard(title: String, info: String, enabled: Boolean = true, highlight: Boolean = false, onClick: () -> Unit) {
+private fun HeroTile(title: String, subtitle: String, info: String, onClick: () -> Unit) {
     var showInfo by remember { mutableStateOf(false) }
-    Card(
-        onClick = onClick,
-        enabled = enabled,
-        colors = if (highlight) CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
-            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-        ) else CardDefaults.cardColors(),
-        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+    Box(
+        Modifier.fillMaxWidth().height(196.dp).clip(TileShape)
+            .background(Brush.linearGradient(listOf(Color(0xFF84EE00), Color(0xFF4FB400))))
+            .clickable(onClick = onClick),
     ) {
+        Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.SpaceBetween) {
+            Box(
+                Modifier.size(60.dp).clip(RoundedCornerShape(20.dp)).background(Color.Black.copy(alpha = 0.14f)),
+                contentAlignment = Alignment.Center,
+            ) { HubIconView(HubIcon.INSTALL, HeroText, 34.dp) }
+            Column {
+                Text(title, fontSize = 24.sp, fontWeight = FontWeight.Bold, color = HeroText)
+                Text(subtitle, fontSize = 13.sp, color = HeroText.copy(alpha = 0.72f))
+            }
+        }
+        Box(Modifier.align(Alignment.TopEnd).padding(14.dp)) {
+            CompositionLocalProvider(LocalContentColor provides HeroText) { InfoDot { showInfo = true } }
+            if (showInfo) InfoBalloon(title, info, mono = false) { showInfo = false }
+        }
+    }
+}
+
+/** A full-width tile: an icon, the name with one short line under it, and the (i) on the right. */
+@Composable
+private fun WideTile(icon: HubIcon, tint: Color, title: String, subtitle: String, info: String, onClick: () -> Unit) {
+    var showInfo by remember { mutableStateOf(false) }
+    Card(onClick = onClick, shape = TileShape, modifier = Modifier.fillMaxWidth().height(96.dp)) {
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 16.dp),
+            Modifier.fillMaxSize().padding(horizontal = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            Text(title, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+            IconSquare(icon, tint, 48.dp)
+            Column(Modifier.weight(1f)) {
+                Text(title, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+                Text(subtitle, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             Box {
                 InfoDot { showInfo = true }
-                if (showInfo) InfoBalloon(title.replace("\n", " "), info, mono = false) { showInfo = false }
+                if (showInfo) InfoBalloon(title, info, mono = false) { showInfo = false }
+            }
+        }
+    }
+}
+
+/** A half-width tile that is not ready yet: dimmed, with "soon" where the subtitle would be. The (i) still works. */
+@Composable
+private fun SoonTile(icon: HubIcon, tint: Color, title: String, info: String, modifier: Modifier = Modifier) {
+    var showInfo by remember { mutableStateOf(false) }
+    Box(
+        modifier.height(150.dp).clip(TileShape)
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)),
+    ) {
+        Column(
+            Modifier.fillMaxSize().padding(16.dp).alpha(0.62f),
+            verticalArrangement = Arrangement.SpaceBetween,
+        ) {
+            IconSquare(icon, tint, 48.dp)
+            Column {
+                Text(title, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(6.dp))
+                Box(
+                    Modifier.clip(CircleShape).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f))
+                        .padding(horizontal = 8.dp, vertical = 3.dp),
+                ) { Text("SOON", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp) }
+            }
+        }
+        Box(Modifier.align(Alignment.TopEnd).padding(14.dp)) {
+            InfoDot { showInfo = true }
+            if (showInfo) InfoBalloon(title, info, mono = false) { showInfo = false }
+        }
+    }
+}
+
+@Composable
+private fun IconSquare(icon: HubIcon, tint: Color, size: Dp) {
+    Box(
+        Modifier.size(size).clip(RoundedCornerShape(16.dp)).background(tint.copy(alpha = 0.17f)),
+        contentAlignment = Alignment.Center,
+    ) { HubIconView(icon, tint, size * 0.55f) }
+}
+
+/** The icons of page 2, drawn here (24 x 24 grid, round line ends), so no icon library is needed. */
+private enum class HubIcon { INSTALL, SETTINGS, FLASK, HEART }
+
+@Composable
+private fun HubIconView(icon: HubIcon, color: Color, size: Dp) {
+    Canvas(Modifier.size(size)) {
+        val k = this.size.minDimension / 24f
+        val stroke = Stroke(width = 2f * k, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        fun o(x: Float, y: Float) = Offset(x * k, y * k)
+        fun line(x1: Float, y1: Float, x2: Float, y2: Float) =
+            drawLine(color, o(x1, y1), o(x2, y2), strokeWidth = 2f * k, cap = StrokeCap.Round)
+        when (icon) {
+            HubIcon.INSTALL -> {
+                line(12f, 4f, 12f, 14f)
+                line(12f, 14f, 8f, 10f)
+                line(12f, 14f, 16f, 10f)
+                line(5f, 19f, 19f, 19f)
+            }
+            HubIcon.SETTINGS -> {
+                line(4f, 7f, 12f, 7f)
+                line(18f, 7f, 20f, 7f)
+                line(4f, 17f, 6f, 17f)
+                line(12f, 17f, 20f, 17f)
+                drawCircle(color, radius = 2.4f * k, center = o(15f, 7f), style = stroke)
+                drawCircle(color, radius = 2.4f * k, center = o(9f, 17f), style = stroke)
+            }
+            HubIcon.FLASK -> {
+                line(9.5f, 3f, 14.5f, 3f)
+                line(7.8f, 14.5f, 16.2f, 14.5f)
+                val path = Path().apply {
+                    moveTo(10.5f * k, 3f * k)
+                    lineTo(10.5f * k, 9f * k)
+                    lineTo(5.3f * k, 17.6f * k)
+                    quadraticBezierTo(4.3f * k, 20.5f * k, 7f * k, 20.5f * k)
+                    lineTo(17f * k, 20.5f * k)
+                    quadraticBezierTo(19.7f * k, 20.5f * k, 18.7f * k, 17.6f * k)
+                    lineTo(13.5f * k, 9f * k)
+                    lineTo(13.5f * k, 3f * k)
+                }
+                drawPath(path, color, style = stroke)
+            }
+            HubIcon.HEART -> {
+                val path = Path().apply {
+                    moveTo(12f * k, 20.5f * k)
+                    cubicTo(5f * k, 15.5f * k, 3.5f * k, 11.5f * k, 3.5f * k, 8.8f * k)
+                    cubicTo(3.5f * k, 6.4f * k, 5.4f * k, 4.6f * k, 7.6f * k, 4.6f * k)
+                    cubicTo(9.5f * k, 4.6f * k, 11.2f * k, 5.6f * k, 12f * k, 7.4f * k)
+                    cubicTo(12.8f * k, 5.6f * k, 14.5f * k, 4.6f * k, 16.4f * k, 4.6f * k)
+                    cubicTo(18.6f * k, 4.6f * k, 20.5f * k, 6.4f * k, 20.5f * k, 8.8f * k)
+                    cubicTo(20.5f * k, 11.5f * k, 19f * k, 15.5f * k, 12f * k, 20.5f * k)
+                    close()
+                }
+                drawPath(path, color, style = stroke)
             }
         }
     }

@@ -42,7 +42,12 @@ class SshSession(host: String) : AutoCloseable {
         cfg["mac.c2s"] = macs
         session.setConfig(cfg)
         session.timeout = 15000
-        session.connect(8000)
+        try {
+            session.connect(8000)
+        } catch (e: com.jcraft.jsch.JSchException) {
+            if (Reach.looksUnreachable(e)) throw SshUnreachable(e.message ?: e.toString(), e)
+            throw e
+        }
     }
 
     class Result(val out: ByteArray, val err: String, val exit: Int) {

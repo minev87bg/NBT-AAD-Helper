@@ -3,7 +3,7 @@
 Android app that edits `/opt/aa/nbt-aad.env` on a BMW / Toyota Supra NBT Evo head unit running
 [NBT-AAD](https://github.com/Sq00ky/Supra-iDrive6-Android-Auto) (native Android Auto).
 
-Status: tested in a car for detection, reset, read and save. The installer ("Install / update NBT Android Auto") failed its first car test because the head unit's SSH login has no `chmod`, `wc` or `cksum`; version 1.0.13 is built for that and has not been tried in a car yet. EXPERIMENTAL and CONTRIBUTE are announced but not built.
+Status: tested in a car for detection, reset, read, save, install and going back. Version 1.0.16 (every reset scans for the car first, SSH actions look for the car again when the connection fails, new page 2) has not been tried in a car yet. EXPERIMENTAL and CONTRIBUTE are announced but not built.
 
 ## Get the APK
 Every successful build is published as a release (Releases page, newest on top, `NBT-AAD-Helper-v1.0.N.apk`).
@@ -33,10 +33,17 @@ once, then install a release. From then on updates install over the existing app
    copy is built into the app. Internet is also needed for the app's own updates and for the releases list and
    downloads of the installer.
 2. Phone hotspot on, WiFi dongle connected to it (or Ethernet with OTG), car on (ignition / key on).
-3. DETECT CAR. If the dot is red, use "Reset head unit" (no SSH needed) and wait for green.
-4. NEXT opens the page where you choose what to do, four buttons: **CHANGE A SETTING**, **INSTALL / UPDATE NBT
-   ANDROID AUTO**, **EXPERIMENTAL** (browse issues and pull requests, scan them for files; coming next) and
-   **CONTRIBUTE** (pick log files from the head unit, zip them, open the issue page in the browser; coming later).
+3. DETECT CAR. If the dot is red, use "Reset head unit" (no SSH needed) and wait for green. Every reset button
+   (here and in the result windows) first looks for the car again, as DETECT CAR does, so the reset is sent to the
+   gateway as it is now: the phone's hotspot may give the car's parts new addresses between two sessions.
+4. NEXT opens the page where you choose what to do, four tiles: **Install / update** (big green tile, NBT Android
+   Auto), **Change a setting** (edit nbt-aad.env), **Experimental** (browse issues and pull requests, scan them for
+   files; coming next) and **Contribute** (pick log files from the head unit, zip them, open the issue page in the
+   browser; coming later). The (i) on each tile says what it is for.
+
+If the SSH connection to the head unit cannot be made (an old address), Install, Go back, the status check, TOOLS CHECK,
+reading the options and SAVE look for the car again and try once more at the address they find. A failure after the
+connection was made is not repeated.
 
 The first screen also has a small "Check for updates" button, under the update message at the top, so the result shows
 where the eyes already are. The app and the settings list are checked at every start as well, but people often only
@@ -66,7 +73,7 @@ open SSH itself). It does by program what Sq00ky's `updating.md` does by hand wi
   `/opt/aa/NbtAad.old`, never left inside `Plugins`), and the new one takes its place. Nothing is overwritten while it
   is in use. `nbt-aad.env` is not touched. `pf_aa` is not installed: the firewall rules are built into `nbt-aad`.
 - The result window is short: what was installed, a note that restarting the head unit is recommended, and a
-  "Reset HeadUnit" button (the same reset as on the first screen, no SSH needed). "Show log" opens the full log in a
+  "Reset HeadUnit" button (the same reset as on the first screen: it looks for the car first, then needs no SSH). "Show log" opens the full log in a
   small console. The log carries the time of each step, so a slow step can be seen.
 - Speed: every SSH command costs the head unit a good part of a second, so an install is only a handful of them (look,
   prepare, one upload per file, one check, one replace). Uploads are checked by size (SSH protects the transfer itself);

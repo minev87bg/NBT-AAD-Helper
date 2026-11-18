@@ -155,8 +155,8 @@ private fun DetectScreen(vm: MainViewModel) {
             title = { Text("Reset head unit?") },
             text = {
                 Text(
-                    "Sends a reset command through the car gateway (no SSH needed). The head unit restarts, " +
-                        "which takes a minute or two. The app keeps checking until SSH opens."
+                    "Looks for the car again, then sends a reset command through the car gateway (no SSH needed). " +
+                        "The head unit restarts, which takes a minute or two. The app keeps checking until SSH opens."
                 )
             },
             confirmButton = { TextButton(onClick = { vm.resetHeadUnit() }) { Text("Reset") } },

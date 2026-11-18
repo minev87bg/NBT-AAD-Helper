@@ -7,6 +7,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.nbtaad.editor.net.NetworkBinder
 import com.nbtaad.editor.net.friendlyError
+import com.nbtaad.editor.net.runOnHeadUnit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -45,6 +46,7 @@ class InstallController(
     private val ctx: Context,
     private val scope: CoroutineScope,
     private val host: () -> String?,
+    private val rescan: () -> String?,
 ) {
     // the project's releases
     var releases by mutableStateOf<List<ReleaseInfo>?>(null)
@@ -189,15 +191,14 @@ class InstallController(
     // ---------------- the head unit ----------------
 
     fun readUnit() {
-        val hu = host() ?: return
-        if (unitBusy) return
+        if (host() == null || unitBusy) return
         unitBusy = true
         unitError = false
         unitMessage = "Looking at the head unit…"
         scope.launch(Dispatchers.IO) {
             try {
                 NetworkBinder.bindToLocalNetwork(ctx)
-                unit = HeadUnit.status(hu)
+                unit = runOnHeadUnit(host, rescan) { HeadUnit.status(it) }
                 unitMessage = ""
             } catch (e: Exception) {
                 unitError = true
@@ -259,14 +260,13 @@ class InstallController(
     }
 
     fun diagnose() {
-        val hu = host() ?: return
-        if (diagBusy) return
+        if (host() == null || diagBusy) return
         diagBusy = true
         diagText = "Asking the head unit…"
         scope.launch(Dispatchers.IO) {
             try {
                 NetworkBinder.bindToLocalNetwork(ctx)
-                diagText = HeadUnit.diagnose(hu)
+                diagText = runOnHeadUnit(host, rescan) { HeadUnit.diagnose(it) }
             } catch (e: Exception) {
                 diagText = "Could not ask the head unit: ${friendlyError(e)}"
             } finally {
@@ -289,15 +289,18 @@ class InstallController(
 
     fun install() {
         val v = view ?: return
-        val hu = host() ?: return
-        if (working) return
+        if (host() == null || working) return
         askInstall = false
         recStarted = false
         job = RunState(RunKind.INSTALL, emptyList(), RunStatus.RUNNING)
         scope.launch(Dispatchers.IO) {
             try {
                 NetworkBinder.bindToLocalNetwork(ctx)
-                val out = HeadUnit.install(hu, v.pkg, reporter(recording = true))
+                val rep = reporter(recording = true)
+                val out = runOnHeadUnit(
+                    host, rescan,
+                    onRescan = { addLine("No connection. Looking for the car again…", Level.WARN) },
+                ) { HeadUnit.install(it, v.pkg, rep) }
                 val what = listOfNotNull(
                     if (out.daemon) "nbt-aad" else null,
                     if (out.plugin) "the plugin" else null,
@@ -313,8 +316,7 @@ class InstallController(
     }
 
     fun revert() {
-        val hu = host() ?: return
-        if (working) return
+        if (host() == null || working) return
         val wantDaemon = revertDaemon
         val wantPlugin = revertPlugin
         askRevert = false
@@ -322,7 +324,11 @@ class InstallController(
         scope.launch(Dispatchers.IO) {
             try {
                 NetworkBinder.bindToLocalNetwork(ctx)
-                val out = HeadUnit.revert(hu, reporter(recording = false), wantDaemon, wantPlugin)
+                val rep = reporter(recording = false)
+                val out = runOnHeadUnit(
+                    host, rescan,
+                    onRescan = { addLine("No connection. Looking for the car again…", Level.WARN) },
+                ) { HeadUnit.revert(it, rep, wantDaemon, wantPlugin) }
                 val what = listOfNotNull(
                     if (out.daemon) "nbt-aad" else null,
                     if (out.plugin) "the plugin" else null,
