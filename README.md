@@ -38,6 +38,9 @@ once, then install a release. From then on updates install over the existing app
    ANDROID AUTO**, **EXPERIMENTAL** (browse issues and pull requests, scan them for files; coming next) and
    **CONTRIBUTE** (pick log files from the head unit, zip them, open the issue page in the browser; coming later).
 
+The first screen also has a small "Check for updates" button under the version number. The app and the settings list
+are checked at every start as well, but people often only minimise an app, so the button does it on request.
+
 ### Change a setting
 Every documented setting is listed. READ OPTIONS marks the ones the head unit applies right now
 (green, "Currently applied"). Change values with the dropdowns (Custom... for any other value), then SAVE.
@@ -61,7 +64,12 @@ open SSH itself). It does by program what Sq00ky's `updating.md` does by hand wi
   unit's `cksum`, else a read-back). Only then the old file is renamed to `nbt-aad.old` (the plugin folder to
   `/opt/aa/NbtAad.old`, never left inside `Plugins`), and the new one takes its place. Nothing is overwritten while it
   is in use. `nbt-aad.env` is not touched. `pf_aa` is not installed: the firewall rules are built into `nbt-aad`.
-- Afterwards you restart the head unit (hold the power button 30 seconds), as the update guide says.
+- The result window is short: what was installed, a note that restarting the head unit is recommended, and a
+  "Reset HeadUnit" button (the same reset as on the first screen, no SSH needed). "Show log" opens the full log in a
+  small console. The log carries the time of each step, so a slow step can be seen.
+- Speed: every SSH command costs the head unit a good part of a second, so an install is only a handful of them (look,
+  prepare, one upload per file, one check, one replace). Uploads are checked by size (SSH protects the transfer itself);
+  a file whose size the head unit cannot confirm is read back and compared.
 - "Go back to the previous version" swaps the daemon and/or the plugin with the `.old` ones (you tick which);
   pressing it again goes forward. To return to an official version, install it from the releases list.
 - The SSH login of the head unit has only a few commands (`cat`, `cp`, `mv`, `rm`, `mkdir` and the shell itself).

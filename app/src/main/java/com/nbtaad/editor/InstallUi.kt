@@ -21,10 +21,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nbtaad.editor.install.InstallController
@@ -34,6 +36,7 @@ import com.nbtaad.editor.install.Names
 import com.nbtaad.editor.install.PackageView
 import com.nbtaad.editor.install.ReleaseInfo
 import com.nbtaad.editor.install.ReleaseLogic
+import com.nbtaad.editor.install.RunLine
 import com.nbtaad.editor.install.RunKind
 import com.nbtaad.editor.install.RunState
 import com.nbtaad.editor.install.RunStatus
@@ -88,8 +91,10 @@ fun HubScreen(vm: MainViewModel) {
     if (vm.askDraft) DraftDialog(vm)
 }
 
+/** A choice on page 2: the name on the left, an (i) on the right that opens what it is for. */
 @Composable
-private fun HubCard(title: String, text: String, enabled: Boolean = true, highlight: Boolean = false, onClick: () -> Unit) {
+private fun HubCard(title: String, info: String, enabled: Boolean = true, highlight: Boolean = false, onClick: () -> Unit) {
+    var showInfo by remember { mutableStateOf(false) }
     Card(
         onClick = onClick,
         enabled = enabled,
@@ -99,10 +104,15 @@ private fun HubCard(title: String, text: String, enabled: Boolean = true, highli
         ) else CardDefaults.cardColors(),
         modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
     ) {
-        Column(Modifier.padding(16.dp)) {
-            Text(title, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.height(4.dp))
-            Text(text, fontSize = 13.sp, color = if (highlight) Color.Unspecified else MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(title, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+            Box {
+                InfoDot { showInfo = true }
+                if (showInfo) InfoBalloon(title.replace("\n", " "), info, mono = false) { showInfo = false }
+            }
         }
     }
 }
@@ -144,9 +154,8 @@ fun InstallScreen(vm: MainViewModel) {
                 Text("Install / update NBT Android Auto", fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "Install a release or a build, then restart the head unit. Nothing is thrown away: the version " +
-                        "that was on the head unit stays there, and one button goes back to it. Your settings " +
-                        "(nbt-aad.env) are not touched.",
+                    "Install a release or a build. Nothing is thrown away: the version that was on the head unit " +
+                        "stays there, and one button goes back to it. Your settings (nbt-aad.env) are not touched.",
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -216,7 +225,7 @@ fun InstallScreen(vm: MainViewModel) {
 
     inst.view?.takeIf { inst.askInstall }?.let { PlanDialog(inst, it) }
     if (inst.askRevert) RevertDialog(inst)
-    inst.job?.let { RunDialog(inst, it) }
+    inst.job?.let { RunDialog(vm, inst, it) }
     inst.diagText?.let { DiagDialog(inst, it) }
 }
 
@@ -473,8 +482,8 @@ private fun PlanDialog(inst: InstallController, v: PackageView) {
                     )
                 }
                 Text(
-                    "The app stops Android Auto if it still runs, uploads each file under a temporary name and checks it " +
-                        "arrived intact, and only then renames. Afterwards you restart the head unit.",
+                    "The app stops Android Auto if it still runs, uploads the files under temporary names, checks they " +
+                        "arrived complete, and only then renames them.",
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 8.dp),
@@ -564,17 +573,74 @@ private fun DiagDialog(inst: InstallController, text: String) {
     )
 }
 
+/**
+ * "Restarting the head unit is recommended" goes with a button that does it: the same reset as on the first screen, and
+ * its progress below. Nothing is shown when the app does not know the car's gateway (then there is nothing to send to).
+ */
 @Composable
-private fun RunDialog(inst: InstallController, d: RunState) {
-    val ok = d.status == RunStatus.OK
+internal fun ResetButton(vm: MainViewModel, modifier: Modifier = Modifier) {
+    val note = vm.resetNote
+    if (note != null) {
+        Column(modifier.fillMaxWidth()) {
+            Text(note, fontSize = 12.sp, color = if (vm.feedbackError && !vm.resetting) Red else Color.Unspecified)
+            if (vm.resetting) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 6.dp))
+        }
+    } else if (vm.detect.zgw != null && vm.detect.vin != null) {
+        OutlinedButton(
+            onClick = { vm.resetHeadUnit(fromWindow = true) },
+            enabled = !vm.resetting && !vm.busy,
+            modifier = modifier.fillMaxWidth(),
+        ) { Text("Reset HeadUnit") }
+    }
+}
+
+/** The log as a small console: dark, monospace, scrolled to the newest line. */
+@Composable
+private fun LogConsole(lines: List<RunLine>, maxHeight: Dp) {
     val scroll = rememberScrollState()
-    LaunchedEffect(d.lines.size) { scroll.animateScrollTo(scroll.maxValue) }
+    LaunchedEffect(lines.size) { scroll.animateScrollTo(scroll.maxValue) }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(max = maxHeight)
+            .background(Color(0xFF0E120E), RoundedCornerShape(6.dp))
+            .verticalScroll(scroll)
+            .padding(8.dp),
+    ) {
+        lines.forEach {
+            Text(
+                it.text,
+                fontSize = 11.sp,
+                lineHeight = 14.sp,
+                fontFamily = FontFamily.Monospace,
+                color = when (it.level) {
+                    Level.INFO -> Color(0xFFD0D4D0)
+                    Level.OK -> Color(0xFF7CD68A)
+                    Level.WARN -> Color(0xFFFFB74D)
+                    Level.ERROR -> Color(0xFFFF8A80)
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun RunDialog(vm: MainViewModel, inst: InstallController, d: RunState) {
+    val ok = d.status == RunStatus.OK
+    var showLog by remember { mutableStateOf(false) }
+    val screenH = LocalConfiguration.current.screenHeightDp.dp
+    val bodyMax = screenH * 0.7f - 150.dp          // the whole window stays within 70% of the screen
+    val logMax = (bodyMax - 170.dp).coerceAtLeast(120.dp)
     val isDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
     val successContainer = if (isDark) Color(0xFF1B3B20) else Color(0xFFE8F5E9)
     val what = if (d.kind == RunKind.INSTALL) "Install" else "Going back"
+    val close = {
+        inst.closeRun(readAgain = !vm.resetting)
+        vm.resetNote = null
+    }
 
     AlertDialog(
-        onDismissRequest = { if (d.status != RunStatus.RUNNING) inst.closeRun() },
+        onDismissRequest = { if (d.status != RunStatus.RUNNING) close() },
         containerColor = if (ok) successContainer else AlertDialogDefaults.containerColor,
         modifier = if (ok) Modifier.border(2.dp, Green, RoundedCornerShape(28.dp)) else Modifier,
         title = {
@@ -592,48 +658,41 @@ private fun RunDialog(inst: InstallController, d: RunState) {
             )
         },
         text = {
-            Column(Modifier.heightIn(max = 340.dp).verticalScroll(scroll)) {
-                d.lines.forEach {
-                    Text(
-                        it.text,
-                        fontSize = 13.sp,
-                        color = when (it.level) {
-                            Level.INFO -> Color.Unspecified
-                            Level.OK -> Green
-                            Level.WARN -> Amber
-                            Level.ERROR -> Red
-                        },
-                        modifier = Modifier.padding(vertical = 2.dp),
-                    )
+            Column(Modifier.heightIn(max = bodyMax).verticalScroll(rememberScrollState())) {
+                when (d.status) {
+                    RunStatus.RUNNING -> {
+                        Text(d.lines.lastOrNull()?.text ?: "Starting…", fontSize = 13.sp)
+                        inst.liveLabel?.let { Text("Uploading $it…", fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp)) }
+                        val f = inst.liveFraction
+                        if (f != null) LinearProgressIndicator(progress = { f }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
+                        else LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 10.dp))
+                    }
+                    RunStatus.OK -> {
+                        Text(d.headline, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Green)
+                        for (m in d.notes) Text(m, fontSize = 12.sp, color = Amber, modifier = Modifier.padding(top = 4.dp))
+                        Text("Restarting the head unit is recommended.", fontSize = 13.sp, modifier = Modifier.padding(top = 10.dp))
+                    }
+                    RunStatus.FAIL -> {
+                        Text(d.headline, fontSize = 13.sp, color = Red)
+                        if (d.kind == RunKind.INSTALL) {
+                            Text(
+                                "If a file was already replaced, \"Go back to the previous version\" undoes it.",
+                                fontSize = 12.sp,
+                                modifier = Modifier.padding(top = 8.dp),
+                            )
+                        }
+                    }
                 }
-                if (ok) {
-                    Spacer(Modifier.height(10.dp))
-                    Text(
-                        "Now restart the head unit, as Sq00ky's update guide says: hold the power button (the volume knob) " +
-                            "for 30 seconds until it reboots. That loads the new plugin and puts the file system back " +
-                            "to read only. Then open Media/Radio, Android Auto.",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 13.sp,
-                        color = Green,
-                    )
-                }
-                if (d.status == RunStatus.FAIL) {
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        "If a file was already replaced, \"Go back to the previous version\" undoes it.",
-                        fontSize = 12.sp,
-                    )
-                }
-                if (d.status == RunStatus.RUNNING) {
-                    inst.liveLabel?.let { Text("Uploading $it…", fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp)) }
-                    val f = inst.liveFraction
-                    if (f != null) LinearProgressIndicator(progress = { f }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
-                    else LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 10.dp))
-                }
+                TextButton(
+                    onClick = { showLog = !showLog },
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+                ) { Text(if (showLog) "Hide log" else "Show log", fontSize = 12.sp) }
+                if (showLog) LogConsole(d.lines, logMax)
+                if (ok) ResetButton(vm, Modifier.padding(top = 8.dp))
             }
         },
         confirmButton = {
-            if (d.status != RunStatus.RUNNING) TextButton(onClick = { inst.closeRun() }) { Text("OK") }
+            if (d.status != RunStatus.RUNNING) TextButton(onClick = { close() }) { Text("OK") }
         },
     )
 }

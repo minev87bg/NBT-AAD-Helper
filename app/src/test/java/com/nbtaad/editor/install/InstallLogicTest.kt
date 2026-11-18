@@ -223,18 +223,6 @@ class InstallLogicTest {
         assertTrue(p.inspection.notes.any { it.contains("archive") })
     }
 
-    // ---- checksum, as the head unit's cksum prints it ----
-
-    @Test
-    fun cksumMatchesThePosixExample() {
-        assertEquals(930766865L, PosixCksum.crc("123456789".toByteArray()))
-        assertEquals(4294967295L, PosixCksum.crc(ByteArray(0)))
-        assertEquals(930766865L to 9L, PosixCksum.parse("930766865 9 /opt/aa/nbt-aad.new\n"))
-        assertEquals(1L to 2L, PosixCksum.parse("\n  1   2  name"))
-        assertNull(PosixCksum.parse("cksum: not found"))
-        assertNull(PosixCksum.parse(""))
-    }
-
     // ---- reading what the head unit prints ----
 
     @Test
@@ -317,15 +305,66 @@ class InstallLogicTest {
         val needed = listOf(
             RemoteScripts.swapDaemon("/opt/aa"), RemoteScripts.swapPlugin("/opt/aa", "/p"),
             RemoteScripts.revertDaemon("/opt/aa"), RemoteScripts.revertPlugin("/opt/aa", "/p"),
-            RemoteScripts.stagePlugin("/opt/aa", "/p", true), RemoteScripts.procScan(), RemoteScripts.locate(),
+            RemoteScripts.prepare("/opt/aa", "/p", daemon = true, plugin = true, keepOld = true),
+            RemoteScripts.procScan(), RemoteScripts.locate(), RemoteScripts.probe(),
         )
         for (sc in needed) {
-            for (bad in listOf("wc ", "cksum", "basename", "pidin", "ls ", "head", "sleep")) {
+            for (bad in listOf("wc ", "cksum", "basename", "pidin", "ls ", "head", "sleep", "dd ", "cmp ")) {
                 assertFalse("$bad in:\n$sc", sc.lines().any { !it.trimStart().startsWith("PATH=") && it.contains(bad) })
             }
         }
         assertTrue(RemoteScripts.swapDaemon("/opt/aa").startsWith("PATH="))
         assertFalse(RemoteScripts.swapDaemon("/opt/aa").contains("\u00A4"))
+    }
+
+    @Test
+    fun anInstallIsAFewCommandsNotOnePerFile() {
+        // each command costs the head unit a good part of a second: look, prepare, uploads, check, replace
+        val all = listOf(
+            RemoteScripts.probe(),
+            RemoteScripts.prepare("/opt/aa", "/p", daemon = true, plugin = true, keepOld = false),
+            RemoteScripts.check("/opt/aa", true, listOf("libNbtAad.so", "NbtAad.xml")),
+            RemoteScripts.apply("/opt/aa", "/p", listOf(RemoteScripts.Op.SWAP_DAEMON, RemoteScripts.Op.SWAP_PLUGIN), false),
+        )
+        for (sc in all) assertFalse(sc.contains("\u00A4"))
+        val c = RemoteScripts.check("/opt/aa", true, listOf("libNbtAad.so", "../evil; rm -rf /"))
+        assertTrue(c.contains("NbtAad.new/libNbtAad.so"))
+        assertFalse("only the names of a build are listed", c.contains("evil"))
+        val ap = RemoteScripts.apply("/opt/aa", "/p", listOf(RemoteScripts.Op.SWAP_DAEMON, RemoteScripts.Op.SWAP_PLUGIN), false)
+        assertTrue(ap.contains("swap_daemon || exit"))
+        assertTrue(ap.contains("echo \"DONE plugin\""))
+        assertTrue(ap.indexOf("swap_daemon ||") < ap.indexOf("swap_plugin ||"))
+    }
+
+    @Test
+    fun theCheckIsReadFromTheListing() {
+        val out = "EXEC 0\n" +
+            "-rwxr-xr-x    1 root      root        904668 Nov 18 22:45 nbt-aad.new\n" +
+            "-rw-r--r--    1 root      root          1234 Nov 18 22:45 NbtAad.new/libNbtAad.so\n"
+        val c = RemoteScripts.parseCheck(out)
+        assertEquals(0, c.exec)
+        assertTrue(c.sizeIs("nbt-aad.new", 904668))
+        assertTrue(c.sizeIs("libNbtAad.so", 1234))
+        assertFalse("a size that differs", c.sizeIs("libNbtAad.so", 1235))
+        assertFalse("a file that is not listed", c.sizeIs("NbtAad.xml", 5))
+        // no ls at all: nothing is confirmed, so everything gets read back
+        val none = RemoteScripts.parseCheck("EXEC 14\n")
+        assertEquals(14, none.exec)
+        assertFalse(none.sizeIs("nbt-aad.new", 1))
+        assertNull(RemoteScripts.parseCheck("").exec)
+    }
+
+    @Test
+    fun theResultOfTheReplacingIsRead() {
+        val out = "DONE daemon\nDONE plugin\nF nbt-aad x \nOLDPLUGIN\nL libNbtAad.so \nNBT-AAD-VERSION=v1.9.1\n"
+        assertEquals(true to true, RemoteScripts.parseDone(out))
+        assertEquals(true to false, RemoteScripts.parseDone("DONE daemon\n"))
+        assertEquals(false to false, RemoteScripts.parseDone(""))
+        val s = RemoteScripts.parseStatus("/a", "/p", out)
+        assertTrue(s.hasDaemon)
+        assertEquals("v1.9.1", s.version)
+        assertTrue(RemoteScripts.remountFailed("REMOUNT failed\n"))
+        assertFalse(RemoteScripts.remountFailed("REMOUNT ok\n"))
     }
 
     // ---- releases ----

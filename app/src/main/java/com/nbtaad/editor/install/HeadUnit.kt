@@ -38,21 +38,48 @@ object HeadUnit {
 
     private fun timeoutFor(bytes: Int): Long = 60_000L + bytes / 8
 
+    /** "1.2 s" since the work began: each step of the log carries it, so a slow step can be seen. */
+    private class Clock {
+        private val start = System.nanoTime()
+        private var lap = start
+        fun total(): String = fmt(System.nanoTime() - start)
+
+        /** The time since the last call, for one step. */
+        fun step(): String {
+            val now = System.nanoTime()
+            val d = now - lap
+            lap = now
+            return fmt(d)
+        }
+
+        private fun fmt(ns: Long) = String.format(java.util.Locale.US, "%.1f s", ns / 1e9)
+    }
+
     private fun diagnoseFolders(ssh: SshSession): String =
         ssh.exec(
             "echo '/opt:'; ls /opt 2>&1 | head -12; echo '/net:'; ls /net 2>&1 | head -12; " +
                 "echo 'hu-omap opt:'; ls /net/hu-omap/fs/sda0/opt 2>&1 | head -12"
         ).text.trim().take(600)
 
+    private fun notFound(ssh: SshSession): IOException = IOException(
+        "The NBT-AAD folder (/opt/aa) was not found on the head unit. Is NBT-AAD installed?\n" +
+            "What the SSH shell can see:\n" + diagnoseFolders(ssh)
+    )
+
     private fun locate(ssh: SshSession): Layout {
         val (aa, pl) = RemoteScripts.parseLocate(ssh.exec(RemoteScripts.locate()).text)
-        if (aa == null) {
-            throw IOException(
-                "The NBT-AAD folder (/opt/aa) was not found on the head unit. Is NBT-AAD installed?\n" +
-                    "What the SSH shell can see:\n" + diagnoseFolders(ssh)
-            )
-        }
+        if (aa == null) throw notFound(ssh)
         return Layout(aa, pl)
+    }
+
+    /** The first look at the head unit, in one command: where the folders are, and whether Android Auto runs. */
+    private class Probe(val layout: Layout, val scan: ProcScan)
+
+    private fun probe(ssh: SshSession): Probe {
+        val text = ssh.exec(RemoteScripts.probe(), timeoutMs = 60_000).text
+        val (aa, pl) = RemoteScripts.parseLocate(text)
+        if (aa == null) throw notFound(ssh)
+        return Probe(Layout(aa, pl), RemoteScripts.parseProc(text))
     }
 
     private fun readStatus(ssh: SshSession, lay: Layout): UnitStatus =
@@ -80,8 +107,8 @@ object HeadUnit {
     private fun scan(ssh: SshSession): ProcScan =
         RemoteScripts.parseProc(try { ssh.exec(RemoteScripts.procScan(), timeoutMs = 30_000).text } catch (e: Exception) { "" })
 
-    private fun stopDaemon(ssh: SshSession, rep: Reporter) {
-        var p = scan(ssh)
+    private fun stopDaemon(ssh: SshSession, rep: Reporter, first: ProcScan) {
+        var p = first
         if (!p.scanned) {
             rep.say(
                 "The app cannot see the head unit's process list, so it cannot tell whether Android Auto runs. " +
@@ -108,22 +135,12 @@ object HeadUnit {
         rep.say("Android Auto is stopped.", Level.OK)
     }
 
-    private fun remountRw(ssh: SshSession, rep: Reporter) {
-        rep.say("Making the partition writable…", Level.INFO)
-        var r = ssh.exec("mount -o remount rw /net/hu-omap/fs/sda0")
-        if (r.exit != 0) {
-            r = ssh.exec("mount -o remount rw /fs/sda0")
-            if (r.exit != 0) {
-                rep.say("The remount reported: ${r.err.trim().ifEmpty { "exit ${r.exit}" }} (continuing).", Level.WARN)
-            }
-        }
-    }
 
     // ---- uploading ----
 
-    /** Sends the bytes to [path] and proves they arrived: by the head unit's own checksum, else by reading back. */
-    private fun upload(ssh: SshSession, path: String, p: Payload, done: Long, total: Long, rep: Reporter) {
-        rep.say("Uploading ${p.name} (${ReleaseLogic.mb(p.size.toLong())})…", Level.INFO)
+    /** Sends the bytes to [path]. What arrived is checked once for all files afterwards (see [checkUpload]). */
+    private fun upload(ssh: SshSession, path: String, p: Payload, done: Long, total: Long, rep: Reporter, clock: Clock) {
+        rep.progress(p.name, done, total)
         var last = 0L
         val r = ssh.exec("cat > $path", stdin = p.bytes, timeoutMs = timeoutFor(p.size)) { sent ->
             if (sent - last >= 64 * 1024 || sent == p.size.toLong()) {
@@ -138,37 +155,59 @@ object HeadUnit {
             )
         }
         rep.progress(p.name, done + p.size, total)
-        rep.say("${p.name} arrived: ${verify(ssh, path, p)}.", Level.OK)
+        rep.say("Uploaded ${p.name} (${ReleaseLogic.mb(p.size.toLong())}, ${clock.step()}).", Level.INFO)
     }
 
-    private fun verify(ssh: SshSession, path: String, p: Payload): String {
-        val want = p.bytes.size.toLong()
-        val sum = ssh.exec(RemoteScripts.cksum(path), timeoutMs = 60_000)
-        val parsed = if (sum.exit == 0) PosixCksum.parse(sum.text) else null
-        if (parsed != null) {
-            if (parsed.second != want) {
-                throw IOException("${p.name} arrived incomplete: ${parsed.second} of $want bytes.")
-            }
-            if (parsed.first == PosixCksum.crc(p.bytes)) return "checksum matches"
-            // the size is right but the sum differs: either damaged, or this cksum counts differently; read it back
-        } else {
-            val size = ssh.exec(RemoteScripts.wcBytes(path)).text.trim().toLongOrNull()
-            if (size != null && size != want) throw IOException("${p.name} arrived incomplete: $size of $want bytes.")
-        }
+    /** The slow, sure way to prove a file arrived: read it back and compare. Only used for what `ls` could not confirm. */
+    private fun readBack(ssh: SshSession, path: String, p: Payload) {
         val back = ssh.exec("cat $path", timeoutMs = timeoutFor(p.size))
         if (!back.out.contentEquals(p.bytes)) {
             throw IOException("${p.name} on the head unit differs from what was sent. Nothing was replaced.")
         }
-        return "read back and identical"
     }
 
-    private fun script(ssh: SshSession, what: String, body: String, timeoutMs: Long = 120_000) {
-        val r = ssh.exec(body, timeoutMs = timeoutMs)
-        if (r.exit != 0) {
-            val why = RemoteScripts.exitMeaning(r.exit)
-            val err = r.err.trim().takeIf { it.isNotEmpty() }?.let { " ($it)" } ?: ""
-            throw IOException("$what failed: $why$err.")
+    /**
+     * One command asks the head unit whether the new daemon can be run and how big each uploaded file is. The upload
+     * itself is protected by SSH, so a size that matches proves nothing was cut off; a file whose size the head unit
+     * cannot confirm is read back and compared.
+     */
+    private fun checkUpload(
+        ssh: SshSession, lay: Layout, daemon: Payload?, plugin: List<Payload>, rep: Reporter, clock: Clock,
+    ) {
+        val r = ssh.exec(RemoteScripts.check(lay.aa, daemon != null, plugin.map { it.name }), timeoutMs = 60_000)
+        if (r.exit != 0) throw IOException("Checking the uploaded files failed: ${RemoteScripts.exitMeaning(r.exit)}.")
+        val c = RemoteScripts.parseCheck(r.text)
+        if (daemon != null) {
+            when (c.exec) {
+                0 -> {}
+                14 -> throw IOException(
+                    "The new nbt-aad is uploaded but cannot be made executable on the head unit: its SSH login has " +
+                        "no chmod the app can use. Nothing was replaced."
+                )
+                15 -> throw IOException("The uploaded nbt-aad is not on the head unit. Nothing was replaced.")
+                else -> throw IOException("The head unit did not say whether the new nbt-aad can be run. Nothing was replaced.")
+            }
         }
+        var readBacks = 0
+        val items = listOfNotNull(daemon?.let { Triple("nbt-aad.new", "${lay.aa}/nbt-aad.new", it) }) +
+            plugin.map { Triple(it.name, "${lay.aa}/NbtAad.new/${it.name}", it) }
+        for ((listedName, path, p) in items) {
+            if (c.sizeIs(listedName, p.size.toLong())) continue
+            readBacks++
+            readBack(ssh, path, p)
+        }
+        rep.say(
+            (if (daemon != null) "nbt-aad can be run. " else "") +
+                (if (readBacks == 0) "All files arrived complete" else "All files arrived complete ($readBacks read back)") +
+                " (${clock.step()}).",
+            Level.OK,
+        )
+    }
+
+    private fun stepFailure(what: String, code: Int, err: String): IOException {
+        val why = RemoteScripts.exitMeaning(code)
+        val extra = err.trim().takeIf { it.isNotEmpty() }?.let { " ($it)" } ?: ""
+        return IOException("$what failed: $why$extra.")
     }
 
     // ---- install ----
@@ -179,10 +218,13 @@ object HeadUnit {
         val plugin = pkg.pluginFiles.map { pkg.payloads.getValue(it) }
         val skipped = pkg.found.filter { it == Names.FIREWALL }
         val total = (daemon?.size ?: 0).toLong() + plugin.sumOf { it.size.toLong() }
+        val clock = Clock()
 
         rep.say("Logging in to $host…", Level.INFO)
         return SshSession(host).use { ssh ->
-            val lay = locate(ssh)
+            rep.say("Logged in (${clock.step()}).", Level.INFO)
+            val pr = probe(ssh)
+            val lay = pr.layout
             rep.say("NBT-AAD folder: ${lay.aa}", Level.INFO)
             if (plugin.isNotEmpty()) {
                 val pl = lay.plugin ?: throw IOException(
@@ -191,58 +233,48 @@ object HeadUnit {
                 )
                 rep.say("Plugin folder: $pl", Level.INFO)
             }
-            stopDaemon(ssh, rep)
-            remountRw(ssh, rep)
-            ssh.exec(RemoteScripts.cleanStaging(lay.aa))
+            stopDaemon(ssh, rep, pr.scan)
+            clock.step()
 
             // Everything is uploaded and checked first; nothing on the head unit changes until all of it is there.
-            var done = 0L
             try {
+                val prep = ssh.exec(
+                    RemoteScripts.prepare(lay.aa, lay.plugin, daemon != null, plugin.isNotEmpty(), keepOld = !pkg.fullPlugin),
+                    timeoutMs = 90_000,
+                )
+                if (prep.exit != 0) throw stepFailure("Preparing the head unit", prep.exit, prep.err)
+                if (RemoteScripts.remountFailed(prep.text)) {
+                    rep.say("The partition could not be made writable (continuing).", Level.WARN)
+                }
+                rep.say("Head unit prepared (${clock.step()}).", Level.INFO)
+
+                var done = 0L
                 if (daemon != null) {
-                    ssh.exec(RemoteScripts.stageDaemon(lay.aa))
-                    upload(ssh, "${lay.aa}/nbt-aad.new", daemon, done, total, rep)
+                    upload(ssh, "${lay.aa}/nbt-aad.new", daemon, done, total, rep, clock)
                     done += daemon.size
-                    val x = ssh.exec(RemoteScripts.makeExec(lay.aa), timeoutMs = 60_000)
-                    if (x.exit != 0) {
-                        throw IOException(
-                            "The new nbt-aad is uploaded but cannot be made executable on the head unit: its SSH " +
-                                "login has no chmod the app can use. Nothing was replaced."
-                        )
-                    }
-                    rep.say("nbt-aad is executable.", Level.OK)
                 }
-                if (plugin.isNotEmpty()) {
-                    script(ssh, "Preparing the plugin files", RemoteScripts.stagePlugin(lay.aa, lay.plugin, keepOld = !pkg.fullPlugin))
-                    for (p in plugin) {
-                        upload(ssh, "${lay.aa}/NbtAad.new/${p.name}", p, done, total, rep)
-                        done += p.size
-                    }
+                for (p in plugin) {
+                    upload(ssh, "${lay.aa}/NbtAad.new/${p.name}", p, done, total, rep, clock)
+                    done += p.size
                 }
+                checkUpload(ssh, lay, daemon, plugin, rep, clock)
             } catch (e: Exception) {
                 runCatching { ssh.exec(RemoteScripts.cleanStaging(lay.aa)) }
                 throw e
             }
 
-            var daemonDone = false
-            var pluginDone = false
-            val problems = ArrayList<String>()
-            try {
-                if (daemon != null) {
-                    rep.say("Replacing nbt-aad (the old one is kept as nbt-aad.old)…", Level.INFO)
-                    script(ssh, "Replacing nbt-aad", RemoteScripts.swapDaemon(lay.aa))
-                    daemonDone = true
-                    rep.swapped("daemon")
-                    rep.say("nbt-aad is replaced.", Level.OK)
-                }
-                if (plugin.isNotEmpty()) {
-                    rep.say("Replacing the plugin folder (the old one is kept in ${lay.aa}/NbtAad.old)…", Level.INFO)
-                    script(ssh, "Replacing the plugin", RemoteScripts.swapPlugin(lay.aa, lay.plugin!!))
-                    pluginDone = true
-                    rep.swapped("plugin")
-                    rep.say("The plugin is replaced.", Level.OK)
-                }
-            } catch (e: Exception) {
+            // the replacing and the look at the result are one command
+            val ops = listOfNotNull(
+                if (daemon != null) RemoteScripts.Op.SWAP_DAEMON else null,
+                if (plugin.isNotEmpty()) RemoteScripts.Op.SWAP_PLUGIN else null,
+            )
+            val r = ssh.exec(RemoteScripts.apply(lay.aa, lay.plugin, ops, remount = false), timeoutMs = 120_000)
+            val (daemonDone, pluginDone) = RemoteScripts.parseDone(r.text)
+            if (daemonDone) rep.swapped("daemon")
+            if (pluginDone) rep.swapped("plugin")
+            if (r.exit != 0) {
                 runCatching { ssh.exec(RemoteScripts.cleanStaging(lay.aa)) }
+                val e = stepFailure(if (daemonDone || daemon == null) "Replacing the plugin" else "Replacing nbt-aad", r.exit, r.err)
                 if (daemonDone) {
                     throw IOException(
                         "${e.message} The new nbt-aad is already in place, the old plugin is still there. " +
@@ -251,29 +283,31 @@ object HeadUnit {
                 }
                 throw e
             }
+            rep.say(
+                "Replaced " + listOfNotNull(if (daemonDone) "nbt-aad" else null, if (pluginDone) "the plugin" else null)
+                    .joinToString(" and ") + ": the old files are kept as .old (${clock.step()}).",
+                Level.OK,
+            )
 
-            // what the head unit holds now
-            val st = try { readStatus(ssh, lay) } catch (e: Exception) { null }
-            if (st != null) {
-                if (daemon != null) {
-                    val f = st.files[Names.DAEMON]
-                    when {
-                        f == null -> problems += "nbt-aad is not in the folder after the install."
-                        !f.executable -> problems += "nbt-aad is not executable after the install."
-                        f.size >= 0 && f.size != daemon.size.toLong() ->
-                            problems += "nbt-aad on the head unit has ${f.size} bytes, expected ${daemon.size}."
-                    }
+            // what the head unit holds now, as the same command printed it
+            val problems = ArrayList<String>()
+            val st = RemoteScripts.parseStatus(lay.aa, lay.plugin, r.text)
+            if (daemon != null) {
+                val f = st.files[Names.DAEMON]
+                when {
+                    f == null -> problems += "nbt-aad is not in the folder after the install."
+                    !f.executable -> problems += "nbt-aad is not executable after the install."
+                    f.size >= 0 && f.size != daemon.size.toLong() ->
+                        problems += "nbt-aad on the head unit has ${f.size} bytes, expected ${daemon.size}."
                 }
-                for (p in plugin) {
-                    val sz = st.pluginFiles[p.name]
-                    when {
-                        sz == null -> problems += "${p.name} is not in the plugin folder after the install."
-                        sz >= 0 && sz != p.size.toLong() ->
-                            problems += "${p.name} in the plugin folder has $sz bytes, expected ${p.size}."
-                    }
+            }
+            for (p in plugin) {
+                val sz = st.pluginFiles[p.name]
+                when {
+                    sz == null -> problems += "${p.name} is not in the plugin folder after the install."
+                    sz >= 0 && sz != p.size.toLong() ->
+                        problems += "${p.name} in the plugin folder has $sz bytes, expected ${p.size}."
                 }
-            } else {
-                problems += "The final check could not read the head unit."
             }
             for (m in problems) rep.say(m, Level.WARN)
             if (skipped.isNotEmpty()) {
@@ -283,7 +317,8 @@ object HeadUnit {
                     Level.INFO,
                 )
             }
-            Outcome(daemonDone, pluginDone, skipped, daemon?.let { BuildPackage.findVersion(it.bytes) } ?: st?.version, problems)
+            rep.say("Done in ${clock.total()}.", Level.INFO)
+            Outcome(daemonDone, pluginDone, skipped, daemon?.let { BuildPackage.findVersion(it.bytes) } ?: st.version, problems)
         }
     }
 
@@ -294,9 +329,12 @@ object HeadUnit {
      * the plugin are chosen separately: a failed install may have changed only one of them.
      */
     fun revert(host: String, rep: Reporter, daemon: Boolean, plugin: Boolean): Outcome {
+        val clock = Clock()
         rep.say("Logging in to $host…", Level.INFO)
         return SshSession(host).use { ssh ->
-            val lay = locate(ssh)
+            rep.say("Logged in (${clock.step()}).", Level.INFO)
+            val pr = probe(ssh)
+            val lay = pr.layout
             val before = readStatus(ssh, lay)
             val doDaemon = daemon && before.hasPreviousDaemon
             val doPlugin = plugin && before.hasOldPlugin && lay.plugin != null
@@ -305,27 +343,25 @@ object HeadUnit {
                     "There is nothing to swap back for what you chose (no nbt-aad.old or NbtAad.old in ${lay.aa})."
                 )
             }
-            stopDaemon(ssh, rep)
-            remountRw(ssh, rep)
-            var d = false
-            var p = false
-            if (doDaemon) {
-                script(ssh, "Going back to the previous nbt-aad", RemoteScripts.revertDaemon(lay.aa))
-                d = true
-                rep.swapped("daemon")
-                rep.say("nbt-aad is swapped with nbt-aad.old.", Level.OK)
-            }
-            if (doPlugin) {
-                script(ssh, "Going back to the previous plugin", RemoteScripts.revertPlugin(lay.aa, lay.plugin!!))
-                p = true
-                rep.swapped("plugin")
-                rep.say("The plugin folder is swapped with NbtAad.old.", Level.OK)
-            }
-            val after = try { readStatus(ssh, lay) } catch (e: Exception) { null }
-            if (after != null && d && after.daemonBroken) {
+            stopDaemon(ssh, rep, pr.scan)
+            clock.step()
+            val ops = listOfNotNull(
+                if (doDaemon) RemoteScripts.Op.REVERT_DAEMON else null,
+                if (doPlugin) RemoteScripts.Op.REVERT_PLUGIN else null,
+            )
+            val r = ssh.exec(RemoteScripts.apply(lay.aa, lay.plugin, ops, remount = true), timeoutMs = 120_000)
+            val (d, p) = RemoteScripts.parseDone(r.text)
+            if (d) rep.swapped("daemon")
+            if (p) rep.swapped("plugin")
+            if (r.exit != 0) throw stepFailure(if (d || !doDaemon) "Going back to the previous plugin" else "Going back to the previous nbt-aad", r.exit, r.err)
+            if (d) rep.say("nbt-aad is swapped with nbt-aad.old.", Level.OK)
+            if (p) rep.say("The plugin folder is swapped with NbtAad.old.", Level.OK)
+            val after = RemoteScripts.parseStatus(lay.aa, lay.plugin, r.text)
+            if (d && after.daemonBroken) {
                 rep.say("The nbt-aad that is in place now is not executable. Swap it again or install a release.", Level.WARN)
             }
-            Outcome(d, p, emptyList(), after?.version, emptyList())
+            rep.say("Done in ${clock.total()}.", Level.INFO)
+            Outcome(d, p, emptyList(), after.version, emptyList())
         }
     }
 }

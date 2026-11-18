@@ -128,12 +128,23 @@ private fun DetectScreen(vm: MainViewModel) {
             modifier = Modifier.align(Alignment.BottomStart),
         ) { Text("manual IPs", fontSize = 12.sp) }
 
-        Text(
-            "v${vm.appVersion}",
-            fontSize = 11.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.align(Alignment.BottomEnd).padding(end = 6.dp, bottom = 16.dp),
-        )
+        Column(
+            Modifier.align(Alignment.BottomEnd).padding(end = 2.dp, bottom = 2.dp),
+            horizontalAlignment = Alignment.End,
+        ) {
+            Text(
+                "v${vm.appVersion}",
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(end = 6.dp),
+            )
+            TextButton(
+                onClick = { vm.checkForUpdates() },
+                enabled = !vm.checkingForUpdates,
+                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                modifier = Modifier.height(32.dp),
+            ) { Text("Check for updates", fontSize = 12.sp) }
+        }
 
         if (canNext) {
             Button(
@@ -564,7 +575,7 @@ private fun OptionRow(
             }
             Box {
                 InfoDot { showInfo = true }
-                if (showInfo) InfoBalloon(opt) { showInfo = false }
+                if (showInfo) InfoBalloon(opt.key, opt.info) { showInfo = false }
             }
         }
         Spacer(Modifier.height(6.dp))
@@ -665,15 +676,16 @@ private fun OptionRow(
 }
 
 @Composable
-private fun InfoDot(onClick: () -> Unit) {
+internal fun InfoDot(onClick: () -> Unit) {
     Box(
         Modifier.size(26.dp).clip(CircleShape).border(1.dp, Color.Gray, CircleShape).clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) { Text("i", fontSize = 14.sp, fontWeight = FontWeight.Bold) }
 }
 
+/** The small scrollable balloon under an (i): a grey heading and the text. */
 @Composable
-private fun InfoBalloon(opt: Opt, onDismiss: () -> Unit) {
+internal fun InfoBalloon(heading: String, text: String, mono: Boolean = true, onDismiss: () -> Unit) {
     val offsetY = with(LocalDensity.current) { 30.dp.roundToPx() }
     Popup(
         alignment = Alignment.TopEnd,
@@ -688,9 +700,14 @@ private fun InfoBalloon(opt: Opt, onDismiss: () -> Unit) {
             modifier = Modifier.widthIn(max = 280.dp).heightIn(max = 220.dp),
         ) {
             Column(Modifier.verticalScroll(rememberScrollState()).padding(12.dp)) {
-                Text(opt.key, fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = Color.Gray)
+                Text(
+                    heading,
+                    fontFamily = if (mono) FontFamily.Monospace else FontFamily.Default,
+                    fontSize = 11.sp,
+                    color = Color.Gray,
+                )
                 Spacer(Modifier.height(4.dp))
-                Text(opt.info, fontSize = 13.sp)
+                Text(text, fontSize = 13.sp)
             }
         }
     }
@@ -738,13 +755,8 @@ private fun SaveDialog(vm: MainViewModel, d: SaveDialogState) {
                 }
                 if (ok) {
                     Spacer(Modifier.height(10.dp))
-                    Text(
-                        "Now restart the Android Auto Daemon from the head unit: " +
-                            "Media/Radio, Android Auto, Force Stop, then open Android Auto again.",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 13.sp,
-                        color = Green,
-                    )
+                    Text("Restarting the head unit is recommended.", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Green)
+                    ResetButton(vm, Modifier.padding(top = 8.dp))
                 }
                 if (d.status == SaveStatus.RUNNING) {
                     LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 10.dp))

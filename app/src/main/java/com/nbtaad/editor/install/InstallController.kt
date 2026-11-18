@@ -28,7 +28,14 @@ class PackageView(
 enum class RunKind { INSTALL, REVERT }
 enum class RunStatus { RUNNING, OK, FAIL }
 class RunLine(val text: String, val level: Level)
-class RunState(val kind: RunKind, val lines: List<RunLine>, val status: RunStatus)
+/** The log of a run, and how it ended: [headline] is the one line for the summary, [notes] what deserves a second look. */
+class RunState(
+    val kind: RunKind,
+    val lines: List<RunLine>,
+    val status: RunStatus,
+    val headline: String = "",
+    val notes: List<String> = emptyList(),
+)
 
 /**
  * The state behind the "Install / update NBT Android Auto" screen: the project's releases, the files chosen, what is on the head unit,
@@ -272,10 +279,10 @@ class InstallController(
         synchronized(this) { job = job?.let { it.copy2(it.lines + RunLine(text, level)) } }
     }
 
-    private fun RunState.copy2(lines: List<RunLine>) = RunState(kind, lines, status)
+    private fun RunState.copy2(lines: List<RunLine>) = RunState(kind, lines, status, headline, notes)
 
-    private fun finish(status: RunStatus) {
-        synchronized(this) { job = job?.let { RunState(it.kind, it.lines, status) } }
+    private fun finish(status: RunStatus, headline: String, notes: List<String> = emptyList()) {
+        synchronized(this) { job = job?.let { RunState(it.kind, it.lines, status, headline, notes) } }
         liveLabel = null
         liveFraction = null
     }
@@ -295,14 +302,12 @@ class InstallController(
                     if (out.daemon) "nbt-aad" else null,
                     if (out.plugin) "the plugin" else null,
                 ).joinToString(" and ")
-                addLine(
-                    "Installed $what" + (out.daemonVersion?.let { " ($it)" } ?: "") + ".",
-                    if (out.problems.isEmpty()) Level.OK else Level.WARN,
-                )
-                finish(RunStatus.OK)
+                val headline = "Installed $what" + (out.daemonVersion?.let { " ($it)" } ?: "") + "."
+                addLine(headline, if (out.problems.isEmpty()) Level.OK else Level.WARN)
+                finish(RunStatus.OK, headline, out.problems)
             } catch (e: Exception) {
                 addLine(friendlyError(e), Level.ERROR)
-                finish(RunStatus.FAIL)
+                finish(RunStatus.FAIL, friendlyError(e))
             }
         }
     }
@@ -322,20 +327,21 @@ class InstallController(
                     if (out.daemon) "nbt-aad" else null,
                     if (out.plugin) "the plugin" else null,
                 ).joinToString(" and ")
-                addLine("Back to the previous $what" + (out.daemonVersion?.let { " ($it)" } ?: "") + ".", Level.OK)
-                finish(RunStatus.OK)
+                val headline = "Back to the previous $what" + (out.daemonVersion?.let { " ($it)" } ?: "") + "."
+                addLine(headline, Level.OK)
+                finish(RunStatus.OK, headline)
             } catch (e: Exception) {
                 addLine(friendlyError(e), Level.ERROR)
-                finish(RunStatus.FAIL)
+                finish(RunStatus.FAIL, friendlyError(e))
             }
         }
     }
 
-    /** Closes the result and looks at the head unit again. */
-    fun closeRun() {
+    /** Closes the result and looks at the head unit again (not while it restarts: then the card waits for CHECK AGAIN). */
+    fun closeRun(readAgain: Boolean = true) {
         if (job?.status == RunStatus.RUNNING) return
         job = null
         unit = null
-        readUnit()
+        if (readAgain) readUnit()
     }
 }

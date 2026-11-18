@@ -94,6 +94,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     var feedbackError by mutableStateOf(false)
     var detect by mutableStateOf(DetectState())
     var confirmReset by mutableStateOf(false)
+
+    /**
+     * The progress of a reset that was started from a result window (install, go back, save): null while none is shown.
+     * The windows clear it when they close, and the reset stops writing to it then.
+     */
+    var resetNote by mutableStateOf<String?>(null)
     var askDraft by mutableStateOf(false)
     var manualDialog by mutableStateOf(false)
     private var pollJob: Job? = null
@@ -172,6 +178,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (!syncBusy && !syncOk) syncCatalog()
         if (updatePhase == UpdatePhase.FAILED) checkUpdate()
     }
+
+    /** The "Check for updates" button: the app and the list of settings, now (they are also checked at every start). */
+    fun checkForUpdates() {
+        syncCatalog()
+        checkUpdate()
+    }
+
+    val checkingForUpdates: Boolean
+        get() = syncBusy || updatePhase == UpdatePhase.CHECKING || updatePhase == UpdatePhase.DOWNLOADING
 
     /** Looks for a newer release on GitHub. Needs internet; with none it stays quiet (the settings sync says so). */
     fun checkUpdate() {
@@ -352,14 +367,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Reset the head unit through the ZGW (no SSH), then keep checking until SSH opens. */
-    fun resetHeadUnit() {
+    /**
+     * Reset the head unit through the ZGW (no SSH), then keep checking until SSH opens. [fromWindow]: it was started from
+     * a result window, which shows the progress as [resetNote] instead of the feedback line of the first screen.
+     */
+    fun resetHeadUnit(fromWindow: Boolean = false) {
         val zgw = detect.zgw ?: return
         if (detect.vin == null) return // only a gateway that gave a VIN is treated as a car
         confirmReset = false
         pollJob?.cancel()
         resetting = true
         feedbackError = false
+        resetNote = if (fromWindow) "Sending the reset command…" else null
+        fun note(text: String) { if (resetNote != null) resetNote = text }
         feedback = "Sending the reset command to the head unit…"
         pollJob = viewModelScope.launch(Dispatchers.IO) {
             try {
@@ -368,6 +388,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 if (!ok) {
                     feedbackError = true
                     feedback = msg
+                    note(msg)
                     return@launch
                 }
                 detect = detect.copy(ssh = false)
@@ -375,20 +396,24 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 var waited = 0
                 while (isActive && System.currentTimeMillis() < end) {
                     feedback = "$msg Waiting for the head unit to restart… (${waited}s)"
+                    note("The head unit is restarting… (${waited}s)")
                     delay(5000)
                     waited += 5
                     val (hu, open) = CarDetector.findHeadUnit(CarDetector.localNetworks(), zgw)
                     if (hu != null) detect = detect.copy(hu = hu, ssh = open)
                     if (open) {
                         feedback = "Head unit is back and SSH is open. Press NEXT."
+                        note("The head unit is back.")
                         return@launch
                     }
                 }
                 feedbackError = true
                 feedback = "SSH did not open within 4 minutes. Check the head unit, then press DETECT CAR."
+                note("The head unit did not come back within 4 minutes.")
             } catch (e: Exception) {
                 feedbackError = true
                 feedback = "Reset failed: ${friendlyError(e)}"
+                note("Reset failed: ${friendlyError(e)}")
             } finally {
                 resetting = false
             }
@@ -726,5 +751,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun closeSaveDialog() {
         saveDialog = null
+        resetNote = null
     }
 }
