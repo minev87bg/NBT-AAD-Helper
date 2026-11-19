@@ -248,4 +248,46 @@ class MarkdownTest {
         assertFalse(cutNone)
         assertEquals(1, all.size)
     }
+
+    @Test
+    fun picturesAreCollectedPerPostInTheOrderTheyAppear() {
+        val raw = "Look:\n\n![first](https://github.com/user-attachments/assets/aaaa-1111)\n\n" +
+            "<img width=\"200\" alt=\"second\" src=\"https://user-images.githubusercontent.com/1/b.png\">\n\n" +
+            "and https://example.com/shot.JPG inline, and the same ![again](https://github.com/user-attachments/assets/aaaa-1111)\n\n" +
+            "| a | b |\n|---|---|\n| ![cell](https://x.test/c.webp) | text |\n\n- item ![in list](https://x.test/d.gif)\n\n" +
+            "![relative](docs/pic.png) and https://example.com/page.html"
+        val blocks = Markdown.parse(raw)
+        val pics = Markdown.pictures(blocks)
+        assertEquals(
+            listOf(
+                "https://github.com/user-attachments/assets/aaaa-1111", "https://user-images.githubusercontent.com/1/b.png",
+                "https://example.com/shot.JPG", "https://x.test/c.webp", "https://x.test/d.gif",
+            ),
+            pics.map { it.url },
+        )
+        assertEquals("first", pics[0].alt)
+        assertEquals("second", pics[1].alt)
+        // a picture inside the repository is no address, a page is not a picture
+        val last = (blocks.last() as MdBlock.Para).spans
+        assertFalse(last.any { it.picture })
+        assertEquals("[picture: relative] and https://example.com/page.html", txt(last))
+        assertTrue(Markdown.pictures(Markdown.parse("no pictures here")).isEmpty())
+    }
+
+    @Test
+    fun textFilesAreToldFromOtherFiles() {
+        val log = Links.file("https://github.com/user-attachments/files/123/nbt-aad.LOG", "me", "the first post")!!
+        assertTrue(log.isText)
+        assertTrue(Links.file("https://github.com/user-attachments/files/124/notes.md", "me", "a")!!.isText)
+        assertTrue(Links.file("https://github.com/user-attachments/files/125/out.txt", "me", "a")!!.isText)
+        val zip = Links.file("https://github.com/user-attachments/files/126/build.zip", "me", "a")!!
+        assertFalse(zip.isText)
+        assertFalse(Links.file("https://github.com/user-attachments/files/127/data.csv", "me", "a")!!.isText)
+        // pictures are not files
+        assertEquals(null, Links.file("https://github.com/user-attachments/assets/abc", "me", "a"))
+        assertTrue(Links.isImage("https://github.com/user-attachments/assets/abc"))
+        assertTrue(Links.isImage("https://x.test/a.PNG?raw=1"))
+        assertFalse(Links.isImage("https://x.test/video.mp4"))
+        assertFalse(Links.isImage("https://x.test/vector.svg"))
+    }
 }

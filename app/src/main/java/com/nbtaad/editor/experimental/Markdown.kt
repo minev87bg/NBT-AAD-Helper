@@ -20,7 +20,13 @@ data class MdSpan(
     val strike: Boolean = false,
     val code: Boolean = false,
     val link: String? = null,
+    /** A picture: [link] is its address and [alt] its description. The screen shows it in a grid, not in the text. */
+    val picture: Boolean = false,
+    val alt: String = "",
 )
+
+/** A picture in a post. */
+data class MdPicture(val url: String, val alt: String)
 
 sealed class MdBlock {
     data class Heading(val level: Int, val spans: List<MdSpan>) : MdBlock()
@@ -54,6 +60,29 @@ object Markdown {
         val text = decode(raw.replace(BREAK, '\n'))
         spans(text, Style(), out, 0)
         return merge(out)
+    }
+
+    /** The pictures of a post in the order they appear, each address once. */
+    fun pictures(blocks: List<MdBlock>): List<MdPicture> {
+        val out = LinkedHashMap<String, MdPicture>()
+        fun spans(list: List<MdSpan>) {
+            for (s in list) if (s.picture && s.link != null && s.link !in out) out[s.link] = MdPicture(s.link, s.alt)
+        }
+        fun walk(b: MdBlock) {
+            when (b) {
+                is MdBlock.Heading -> spans(b.spans)
+                is MdBlock.Para -> spans(b.spans)
+                is MdBlock.Quote -> b.blocks.forEach(::walk)
+                is MdBlock.Items -> b.items.forEach { item -> item.forEach(::walk) }
+                is MdBlock.Table -> {
+                    b.head.forEach(::spans)
+                    b.rows.forEach { r -> r.forEach(::spans) }
+                }
+                is MdBlock.Code, MdBlock.Rule -> {}
+            }
+        }
+        blocks.forEach(::walk)
+        return out.values.toList()
     }
 
     /** The text of the spans without any styling. */
@@ -508,7 +537,10 @@ object Markdown {
                         flush()
                         val label = plain(inline(l.label)).trim()
                         val url = httpOnly(l.dest)
-                        out += MdSpan(if (label.isEmpty()) "[picture]" else "[picture: $label]", st.bold, st.italic, false, false, url ?: st.link)
+                        out += MdSpan(
+                            if (label.isEmpty()) "[picture]" else "[picture: $label]", st.bold, st.italic, false, false,
+                            url ?: st.link, picture = url != null, alt = label,
+                        )
                         i = l.end
                     }
                 }
@@ -544,7 +576,11 @@ object Markdown {
                         i++
                     } else {
                         flush()
-                        out += MdSpan(url, st.bold, st.italic, st.strike, false, url)
+                        out += if (Links.isImage(url)) {
+                            MdSpan("[picture]", st.bold, st.italic, false, false, url, picture = true)
+                        } else {
+                            MdSpan(url, st.bold, st.italic, st.strike, false, url)
+                        }
                         i += url.length
                     }
                 }
@@ -696,7 +732,7 @@ object Markdown {
         for (s in list) {
             if (s.text.isEmpty()) continue
             val last = out.lastOrNull()
-            if (last != null && !last.code && !s.code && last.bold == s.bold && last.italic == s.italic &&
+            if (last != null && !last.code && !s.code && !last.picture && !s.picture && last.bold == s.bold && last.italic == s.italic &&
                 last.strike == s.strike && last.link == s.link
             ) {
                 out[out.size - 1] = last.copy(text = last.text + s.text)

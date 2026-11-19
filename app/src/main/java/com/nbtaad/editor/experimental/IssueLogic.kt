@@ -35,6 +35,15 @@ enum class FileKind {
 /** A link to a file in a text, where [by] wrote it and [where] it stands ("the first post", "a comment"). */
 data class FileLink(val url: String, val name: String, val kind: FileKind, val by: String, val where: String) {
     val installable: Boolean get() = kind == FileKind.BUILD
+
+    /** A log, a note or a text: shown in a window of the app instead of being downloaded. */
+    val isText: Boolean get() = kind == FileKind.OTHER && TextFiles.isText(name)
+}
+
+object TextFiles {
+    private val EXT = listOf(".log", ".md", ".txt")
+
+    fun isText(name: String): Boolean = EXT.any { name.lowercase().endsWith(it) }
 }
 
 /** A short digest made on the phone from the words of a page, and the links in it. Not an AI summary. */
@@ -121,6 +130,19 @@ object Links {
         val p = path(url).lowercase()
         return h.contains("user-images.githubusercontent.com") || h.contains("private-user-images") ||
             p.startsWith("user-attachments/assets/") || PICTURE.any { p.endsWith(it) }
+    }
+
+    private val IMAGE = listOf(".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp")
+
+    /**
+     * True for a picture the app can show. GitHub's own picture addresses count, although one of them may turn out to
+     * be a video (the app then says it cannot show it and offers the browser).
+     */
+    fun isImage(url: String): Boolean {
+        val h = host(url)
+        val p = path(url).lowercase()
+        return h.contains("user-images.githubusercontent.com") || h.contains("private-user-images") ||
+            p.startsWith("user-attachments/assets/") || IMAGE.any { p.endsWith(it) }
     }
 
     /** The file [url] points at, or null when it is a page, a picture or something else. */

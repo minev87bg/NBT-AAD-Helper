@@ -97,6 +97,7 @@ private fun MdBlocks(blocks: List<MdBlock>, c: MdColors, size: TextUnit, level: 
 
 private fun styled(spans: List<MdSpan>, c: MdColors, size: TextUnit): AnnotatedString = buildAnnotatedString {
     for (s in spans) {
+        if (s.picture) continue   // pictures are shown in the grid under the post
         val st = SpanStyle(
             fontWeight = if (s.bold) FontWeight.Bold else null,
             fontStyle = if (s.italic) FontStyle.Italic else null,
@@ -121,7 +122,9 @@ private fun styled(spans: List<MdSpan>, c: MdColors, size: TextUnit): AnnotatedS
 @Composable
 private fun MdBlockView(b: MdBlock, c: MdColors, size: TextUnit, level: Int) {
     when (b) {
-        is MdBlock.Para -> Text(styled(b.spans, c, size), fontSize = size, lineHeight = size * 1.5f)
+        is MdBlock.Para -> if (b.spans.any { !it.picture && it.text.isNotBlank() }) {
+            Text(styled(b.spans, c, size), fontSize = size, lineHeight = size * 1.5f)
+        }
 
         is MdBlock.Heading -> {
             val px = when (b.level) {

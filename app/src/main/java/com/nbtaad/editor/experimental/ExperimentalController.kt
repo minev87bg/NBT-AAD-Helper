@@ -62,6 +62,17 @@ class ExperimentalController(
     /** What happened when a setting was offered for "Additional options". */
     var settingNote by mutableStateOf("")
 
+    /** A text file (log, note) shown in a window. */
+    class TextDoc(val name: String, val url: String, val text: String, val cut: Boolean)
+
+    /** The pictures of one post, shown one by one; [index] is the one that was tapped. */
+    class Gallery(val title: String, val pictures: List<MdPicture>, val index: Int)
+
+    var textDoc by mutableStateOf<TextDoc?>(null); private set
+    var textBusy by mutableStateOf(false); private set
+    var textMessage by mutableStateOf(""); private set
+    var gallery by mutableStateOf<Gallery?>(null); private set
+
     private val commentCache = HashMap<Int, List<Comment>>()
 
     fun visible(): List<Topic> =
@@ -147,6 +158,9 @@ class ExperimentalController(
         commentsMessage = ""
         aiText = null
         aiMessage = ""
+        textDoc = null
+        textMessage = ""
+        gallery = null
         val cached = commentCache[t.number]
         when {
             cached != null -> comments = cached
@@ -180,6 +194,39 @@ class ExperimentalController(
         summary = null
         aiText = null
         aiMessage = ""
+        textDoc = null
+        gallery = null
+    }
+
+    /** Opens a log, note or text in a window: it is read into memory, nothing is saved on the phone. */
+    fun viewText(link: FileLink) {
+        if (textBusy || !link.isText) return
+        textBusy = true
+        textMessage = ""
+        scope.launch(Dispatchers.IO) {
+            try {
+                val r = IssuesApi.text(ctx, link)
+                textDoc = TextDoc(link.name, link.url, r.text, r.cut)
+            } catch (e: Exception) {
+                AppLog.w("Experimental", "Reading ${link.name} failed: ${e.javaClass.simpleName}: ${e.message}")
+                textMessage = "Could not open ${link.name}: ${Online.describe(e)}"
+            } finally {
+                textBusy = false
+            }
+        }
+    }
+
+    fun closeText() {
+        textDoc = null
+    }
+
+    fun openGallery(title: String, pictures: List<MdPicture>, index: Int) {
+        if (pictures.isEmpty()) return
+        gallery = Gallery(title, pictures, index.coerceIn(0, pictures.size - 1))
+    }
+
+    fun closeGallery() {
+        gallery = null
     }
 
     /** The button: needs the key first (the dialog opens when there is none), then asks Claude. */

@@ -72,6 +72,51 @@ object IssuesApi {
     fun recentComments(ctx: Context, pages: Int = 3): Fetched<List<Comment>> =
         listPages(ctx, "$BASE/issues/comments?sort=created&direction=desc", pages) { IssueParser.comments(it) }
 
+    /** A text file read into memory: [cut] says that only the start of it is here. */
+    class TextFile(val text: String, val cut: Boolean)
+
+    /** Reads a log, note or text that was linked in a page, without saving it. At most [maxBytes] of it. */
+    fun text(ctx: Context, link: FileLink, maxBytes: Int = 800 * 1024): TextFile = Internet.run(ctx) { open ->
+        val c = open(URL(link.url))
+        try {
+            c.connectTimeout = 10000
+            c.readTimeout = 30000
+            c.instanceFollowRedirects = true
+            c.setRequestProperty("User-Agent", "NBT-AAD-Helper")
+            val code = c.responseCode
+            if (code != 200) {
+                throw IOException(
+                    "GitHub answered $code for ${link.name}" +
+                        if (code == 404 || code == 403) ". It may need a sign-in: open it in the browser instead." else ""
+                )
+            }
+            val out = ByteArrayOutputStream()
+            val buf = ByteArray(32 * 1024)
+            var cut = false
+            c.inputStream.use { input ->
+                while (true) {
+                    val room = maxBytes - out.size()
+                    if (room <= 0) {
+                        cut = input.read() >= 0
+                        break
+                    }
+                    val n = input.read(buf, 0, minOf(buf.size, room))
+                    if (n < 0) break
+                    out.write(buf, 0, n)
+                }
+            }
+            val bytes = out.toByteArray()
+            if (Links.looksLikePage(bytes)) {
+                throw IOException("GitHub sent a web page instead of ${link.name} (a sign-in?). Open the link in the browser instead.")
+            }
+            val text = String(bytes, Charsets.UTF_8).removePrefix("\uFEFF").replace("\r\n", "\n").replace('\r', '\n')
+            AppLog.i("GitHub", "Read ${link.name}: ${bytes.size} bytes${if (cut) " (cut)" else ""} from ${link.url}")
+            TextFile(text, cut)
+        } finally {
+            c.disconnect()
+        }
+    }
+
     /** Downloads a file that was linked in a page. A sign-in page instead of the file is reported as such. */
     fun download(ctx: Context, link: FileLink, progress: (Long) -> Unit): SourceFile = Internet.run(ctx) { open ->
         val c = open(URL(link.url))

@@ -65,7 +65,15 @@ looks through the first posts and the newest 300 comments (three requests) for l
 share some with a FILES pill. A page shows its text and comments formatted like on GitHub: headings, **bold**, *italic*, `inline code`, code blocks
 (coloured, scrolling sideways), tables (scrolling sideways), numbered, bulleted and task lists, quotes, rules and
 links (they open in the browser); pictures are shown as a tappable "[picture]" link. Long comments are collapsed with
-**Show more**. **OPEN ON GITHUB** opens the page in the browser. **QUICK SUMMARY** gives a short digest made on the
+**Show more**. **OPEN ON GITHUB** opens the page in the browser.
+The pictures of a post (markdown or HTML pictures and bare picture links) are not drawn inside its text but as a grid of
+small squares under that post. A tap opens a full-screen gallery that holds only the pictures of that post, so you
+always know which post they belong to: swipe left and right for the previous and next one, pinch or double-tap to zoom,
+drag while zoomed; the top bar shows "2 / 5", the post (first post, or the comment and who wrote it) and OPEN IN BROWSER.
+Pictures are loaded into memory only and nothing is saved on the phone (if a picture cannot be decoded, for example a
+video, the tile says so and the browser button opens it). A shared **.log, .md or .txt** file has **VIEW**: it opens in a
+small window in the middle of the screen (70% of the width and height at most) with small, scrollable text and **COPY**
+at the top right, to paste it into an AI chat; the first 800 KB are read, nothing is saved on the phone. **QUICK SUMMARY** gives a short digest made on the
 phone from the words of the page (who wrote it, the first lines, the latest comment, the settings and files it names,
 its links); it is not an AI summary. **SUMMARIZE WITH AI** has Claude (`claude-haiku-5-5`, Anthropic) write the summary
 from the first post and the comments, with the links, files and settings of the page. It needs your own Anthropic API

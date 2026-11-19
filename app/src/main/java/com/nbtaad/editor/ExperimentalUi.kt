@@ -242,7 +242,7 @@ private fun TopicRow(exp: ExperimentalController, t: Topic) {
     }
 }
 
-private fun openLink(handler: androidx.compose.ui.platform.UriHandler, url: String) {
+internal fun openLink(handler: androidx.compose.ui.platform.UriHandler, url: String) {
     try {
         handler.openUri(url)
     } catch (_: Exception) {
@@ -329,15 +329,23 @@ private fun TopicDetail(vm: MainViewModel, t: Topic) {
                 } else {
                     MarkdownView(body)
                 }
+                val bodyPics = remember(body) { Markdown.pictures(body) }
+                if (bodyPics.isNotEmpty()) {
+                    PictureGrid(bodyPics, Modifier.padding(top = 10.dp)) { i ->
+                        exp.openGallery("First post  ·  ${t.author}", bodyPics, i)
+                    }
+                }
                 if (!comments.isNullOrEmpty()) {
                     Spacer(Modifier.height(14.dp))
                     Text("${comments.size} comment${if (comments.size == 1) "" else "s"}", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                 }
             }
         }
-        items(comments ?: emptyList()) { c -> CommentCard(c) }
+        items(comments ?: emptyList()) { c -> CommentCard(exp, c) }
     }
     if (exp.aiKeyDialog) AiKeyDialog(exp)
+    exp.textDoc?.let { doc -> TextFileDialog(doc) { exp.closeText() } }
+    exp.gallery?.let { g -> GalleryDialog(g) { exp.closeGallery() } }
 }
 
 @Composable
@@ -484,13 +492,18 @@ private fun FilesCard(exp: ExperimentalController, files: List<FileLink>, onOpen
                     "${f.by.ifBlank { "someone" }}, ${f.where}" +
                         when (f.kind) {
                             FileKind.BUILD -> ""
-                            FileKind.OTHER -> ", not a build"
+                            FileKind.OTHER -> if (f.isText) ", opens in a window, nothing is saved on the phone" else ", not a build"
                             FileKind.NEEDS_LOGIN -> ", GitHub shows it only to people who are signed in"
                         },
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Row {
+                    if (f.isText) {
+                        TextButton(onClick = { exp.viewText(f) }, enabled = !exp.textBusy) {
+                            Text(if (exp.textBusy) "OPENING…" else "VIEW", fontSize = 12.sp)
+                        }
+                    }
                     if (f.installable) {
                         TextButton(onClick = { exp.download(f) }, enabled = !exp.downloadBusy) {
                             Text("GET FOR INSTALL", fontSize = 12.sp)
@@ -499,6 +512,8 @@ private fun FilesCard(exp: ExperimentalController, files: List<FileLink>, onOpen
                     TextButton(onClick = { onOpen(f.url) }) { Text("OPEN IN BROWSER", fontSize = 12.sp) }
                 }
             }
+            if (exp.textBusy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 4.dp))
+            if (exp.textMessage.isNotEmpty()) Text(exp.textMessage, fontSize = 12.sp, color = Red)
             if (exp.downloadBusy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 4.dp))
             if (exp.downloadMessage.isNotEmpty()) {
                 Text(exp.downloadMessage, fontSize = 12.sp, color = if (exp.downloadError) Red else MaterialTheme.colorScheme.onSurfaceVariant)
@@ -529,10 +544,11 @@ private fun SettingsCard(vm: MainViewModel, settings: List<String>) {
 }
 
 @Composable
-private fun CommentCard(c: Comment) {
+private fun CommentCard(exp: ExperimentalController, c: Comment) {
     var expanded by remember(c) { mutableStateOf(false) }
     val full = remember(c) { Markdown.parse(c.body) }
     val short = remember(full) { Markdown.shorten(full) }
+    val pics = remember(full) { Markdown.pictures(full) }
     OutlinedCard(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         Column(Modifier.padding(12.dp)) {
             Text(
@@ -546,6 +562,11 @@ private fun CommentCard(c: Comment) {
                 Text("(no text)", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else {
                 MarkdownView(if (expanded || !short.second) full else short.first)
+            }
+            if (pics.isNotEmpty()) {
+                PictureGrid(pics, Modifier.padding(top = 8.dp)) { i ->
+                    exp.openGallery("Comment  ·  ${c.author}  ·  ${ReleaseLogic.day(c.created)}", pics, i)
+                }
             }
             if (short.second) {
                 TextButton(onClick = { expanded = !expanded }, contentPadding = PaddingValues(0.dp)) {
