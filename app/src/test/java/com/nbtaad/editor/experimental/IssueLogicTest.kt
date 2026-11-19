@@ -165,4 +165,100 @@ class IssueLogicTest {
         assertFalse(Links.looksLikePage(byteArrayOf(0x50, 0x4B, 0x03, 0x04, 0, 0)))   // a zip starts with PK
         assertFalse(Links.looksLikePage(ByteArray(0)))
     }
+
+    @Test
+    fun theNameTellsWhichFilesAreText() {
+        for (n in listOf(
+            "nbt-aad.log", "NBT-AAD.LOG", "notes.md", "make_db.py", "config.JSON", "run.sh", "main.cpp", "app.log.1", "app.log.old",
+            "app.log.2026-11-19", "nbt-aad (1).txt", "Makefile", ".env", "NbtAad.xml", "patch.diff",
+        )) assertEquals(n, Look.TEXT, TextFiles.byName(n))
+        for (n in listOf("build.zip", "libNbtAad.so", "photo.PNG", "dump.dlt", "app.apk", "Releases.zip", "data.7z.001x".replace(".001x", ""))) {
+            assertEquals(n, Look.BINARY, TextFiles.byName(n))
+        }
+        // nothing certain: the first bytes of the file decide
+        for (n in listOf("nbt-aad", "pf_aa", "NbtAad.manifest", "trace.dump2", "page.html", "nbt-aad (1)")) {
+            assertEquals(n, Look.UNKNOWN, TextFiles.byName(n))
+        }
+        assertTrue(TextFiles.isText("tr.txt"))
+        assertFalse(TextFiles.isText("nbt-aad"))
+    }
+
+    @Test
+    fun aFileLinkKnowsWhetherItsNameSaysText() {
+        val py = Links.file("https://github.com/user-attachments/files/9/make_db.py", "me", "a", 3)!!
+        assertEquals(Look.TEXT, py.look)
+        assertTrue(py.isText)
+        assertEquals(3, py.post)
+        // a part of a build can be text too (the plugin's xml), and is still installable
+        val xml = Links.file("https://github.com/user-attachments/files/9/NbtAad.xml", "me", "a")!!
+        assertTrue(xml.installable)
+        assertTrue(xml.isText)
+        assertEquals(Look.UNKNOWN, Links.file("https://github.com/user-attachments/files/9/nbt-aad", "me", "a")!!.look)
+        // a build artifact that needs a sign-in can never be read
+        val art = Links.file("https://github.com/o/r/actions/runs/1/artifacts/2", "me", "a")!!
+        assertEquals(Look.BINARY, art.look)
+        assertFalse(art.isText)
+    }
+
+    @Test
+    fun theFirstBytesTellTextFromBinary() {
+        fun text(s: String, cs: java.nio.charset.Charset = Charsets.UTF_8) = s.toByteArray(cs)
+        assertTrue(TextFiles.sniff(text("2026-11-19 12:00:01 INFO started\nline two\r\n")))
+        assertTrue(TextFiles.sniff(text("Здравей, свят! Това е лог.\n")))
+        assertTrue(TextFiles.sniff(text("\u001B[32mgreen\u001B[0m and\ttabs\n")))      // colours and tabs are normal in a log
+        assertTrue(TextFiles.sniff(text("caf\u00e9\n", Charsets.ISO_8859_1)))              // an old 8-bit text is still a text
+        assertTrue(TextFiles.sniff(text("\uFEFFhello\r\n", Charsets.UTF_16LE).let { byteArrayOf(0xFF.toByte(), 0xFE.toByte()) + it.drop(0) }))
+        assertTrue(TextFiles.sniff(ByteArray(0)))
+        // a character cut in two at the end of the sample is no reason to refuse
+        val cut = text("ab\u0431").let { it.copyOf(it.size - 1) }
+        assertTrue(TextFiles.sniff(cut))
+        // binary: zero bytes, many control characters, a known header, a web page
+        assertFalse(TextFiles.sniff(byteArrayOf(0x41, 0x42, 0x00, 0x43)))
+        assertFalse(TextFiles.sniff(ByteArray(200) { (it * 7 % 31).toByte() }))
+        assertFalse(TextFiles.sniff(byteArrayOf(0x50, 0x4B, 0x03, 0x04, 0x14, 0x00)))
+        assertFalse(TextFiles.sniff("\u007FELF....".toByteArray(Charsets.ISO_8859_1)))
+        assertFalse(TextFiles.sniff("<!DOCTYPE html><html><body>Sign in</body></html>".toByteArray()))
+        assertFalse(TextFiles.sniff("  <html lang=en>".toByteArray()))
+        // only the start is looked at
+        val big = ByteArray(TextFiles.SAMPLE + 100) { 0x61 }
+        big[TextFiles.SAMPLE + 10] = 0
+        assertTrue(TextFiles.sniff(big))
+    }
+
+    @Test
+    fun bytesBecomeTextTheWayTheFileWasWritten() {
+        assertEquals("a\nb\nc", TextFiles.decode("\uFEFFa\r\nb\rc".toByteArray(Charsets.UTF_8)))
+        assertEquals("Здравей", TextFiles.decode("Здравей".toByteArray(Charsets.UTF_8)))
+        // UTF-16, as a Windows tool writes it
+        val u16 = byteArrayOf(0xFF.toByte(), 0xFE.toByte()) + "log\r\nok".toByteArray(Charsets.UTF_16LE)
+        assertEquals("log\nok", TextFiles.decode(u16))
+        val be = byteArrayOf(0xFE.toByte(), 0xFF.toByte()) + "x".toByteArray(Charsets.UTF_16BE)
+        assertEquals("x", TextFiles.decode(be))
+        // not UTF-8: Windows-1252
+        assertEquals("caf\u00e9", TextFiles.decode(byteArrayOf(0x63, 0x61, 0x66, 0xE9.toByte())))
+        // a UTF-8 text cut in the middle of a character stays UTF-8
+        val cut = "Здравей".toByteArray(Charsets.UTF_8).let { it.copyOf(it.size - 1) }
+        assertTrue(TextFiles.decode(cut, true).startsWith("Здрав"))
+    }
+
+    @Test
+    fun filesRememberWhichPostSharedThem() {
+        val topic = Topic(
+            1, false, "t", "ann", true, false, false, 2, "2026-11-01T10:00:00Z", "2026-11-02T10:00:00Z", emptyList(),
+            "[a.py](https://github.com/user-attachments/files/1/a.py)", "https://github.com/o/r/issues/1",
+        )
+        val comments = listOf(
+            Comment(1, "bob", "2026-11-02T10:00:00Z", "nothing here", "u1"),
+            Comment(
+                1, "cy", "2026-11-03T10:00:00Z",
+                "again [a.py](https://github.com/user-attachments/files/1/a.py) and [b.log](https://github.com/user-attachments/files/2/b.log)",
+                "u2",
+            ),
+        )
+        val files = Digest.filesOf(topic, comments)
+        assertEquals(listOf("a.py", "b.log"), files.map { it.name })
+        assertEquals(0, files[0].post)   // a file shared twice belongs to the first post that shared it
+        assertEquals(2, files[1].post)   // comment 2 is the third post: 0 first post, 1 first comment, 2 second comment
+        assertEquals("a comment on 2026-11-03", files[1].where)
+    }
 }

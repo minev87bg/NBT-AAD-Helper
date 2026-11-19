@@ -109,9 +109,41 @@ object IssuesApi {
             if (Links.looksLikePage(bytes)) {
                 throw IOException("GitHub sent a web page instead of ${link.name} (a sign-in?). Open the link in the browser instead.")
             }
-            val text = String(bytes, Charsets.UTF_8).removePrefix("\uFEFF").replace("\r\n", "\n").replace('\r', '\n')
+            val text = TextFiles.decode(bytes, cut)
             AppLog.i("GitHub", "Read ${link.name}: ${bytes.size} bytes${if (cut) " (cut)" else ""} from ${link.url}")
             TextFile(text, cut)
+        } finally {
+            c.disconnect()
+        }
+    }
+
+    /**
+     * Looks at the first bytes of a file that was linked in a page and tells whether it is text that can be read in the
+     * app. Only a small piece is asked for, and nothing is saved.
+     */
+    fun looksReadable(ctx: Context, link: FileLink): Boolean = Internet.run(ctx) { open ->
+        val c = open(URL(link.url))
+        try {
+            c.connectTimeout = 10000
+            c.readTimeout = 20000
+            c.instanceFollowRedirects = true
+            c.setRequestProperty("User-Agent", "NBT-AAD-Helper")
+            c.setRequestProperty("Range", "bytes=0-${TextFiles.SAMPLE - 1}")
+            val code = c.responseCode
+            if (code == 416) return@run true   // an empty file
+            if (code != 200 && code != 206) throw IOException("GitHub answered $code for ${link.name}")
+            val buf = ByteArray(TextFiles.SAMPLE)
+            var n = 0
+            c.inputStream.use { input ->
+                while (n < buf.size) {
+                    val r = input.read(buf, n, buf.size - n)
+                    if (r < 0) break
+                    n += r
+                }
+            }
+            val ok = TextFiles.sniff(buf.copyOf(n))
+            AppLog.i("GitHub", "Looked into ${link.name}: ${if (ok) "text" else "not text"} (first $n bytes)")
+            ok
         } finally {
             c.disconnect()
         }

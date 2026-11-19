@@ -28,6 +28,12 @@ data class MdSpan(
 /** A picture in a post. */
 data class MdPicture(val url: String, val alt: String)
 
+/**
+ * A piece of a paragraph. Lines that link a file stand alone: [files] are the addresses of the files linked in
+ * [spans], and the screen puts a button for each of them under the text. Other lines stay together in one piece.
+ */
+data class MdPiece(val spans: List<MdSpan>, val files: List<String>)
+
 sealed class MdBlock {
     data class Heading(val level: Int, val spans: List<MdSpan>) : MdBlock()
     data class Para(val spans: List<MdSpan>) : MdBlock()
@@ -87,6 +93,49 @@ object Markdown {
 
     /** The text of the spans without any styling. */
     fun plain(spans: List<MdSpan>): String = spans.joinToString("") { it.text }
+
+    /** The spans cut into lines at every line break. A break at the very end does not make an empty line. */
+    fun lines(spans: List<MdSpan>): List<List<MdSpan>> {
+        val out = ArrayList<List<MdSpan>>()
+        var cur = ArrayList<MdSpan>()
+        for (s in spans) {
+            val parts = s.text.split('\n')
+            parts.forEachIndexed { i, part ->
+                if (i > 0) {
+                    out += cur
+                    cur = ArrayList()
+                }
+                if (part.isNotEmpty() || s.picture) cur += if (parts.size == 1) s else s.copy(text = part)
+            }
+        }
+        if (cur.isNotEmpty()) out += cur
+        return out
+    }
+
+    /**
+     * A paragraph cut so that every line that links a file stands alone: there the screen shows the button for the file.
+     * The lines between such lines stay together. [isFile] says whether an address is a file.
+     */
+    fun pieces(spans: List<MdSpan>, isFile: (String) -> Boolean): List<MdPiece> {
+        val out = ArrayList<MdPiece>()
+        var rest = ArrayList<MdSpan>()
+        fun flush() {
+            if (rest.isNotEmpty()) out += MdPiece(rest, emptyList())
+            rest = ArrayList()
+        }
+        for (line in lines(spans)) {
+            val files = line.mapNotNull { s -> s.link?.takeIf { !s.picture && isFile(it) } }.distinct()
+            if (files.isEmpty()) {
+                if (rest.isNotEmpty()) rest += MdSpan("\n")
+                rest += line
+            } else {
+                flush()
+                out += MdPiece(line, files)
+            }
+        }
+        flush()
+        return out
+    }
 
     /** How many characters of text a block shows. */
     fun size(b: MdBlock): Int = when (b) {

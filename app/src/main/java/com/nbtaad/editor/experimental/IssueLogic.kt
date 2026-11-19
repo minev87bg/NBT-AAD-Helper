@@ -32,18 +32,143 @@ enum class FileKind {
     NEEDS_LOGIN,
 }
 
-/** A link to a file in a text, where [by] wrote it and [where] it stands ("the first post", "a comment"). */
-data class FileLink(val url: String, val name: String, val kind: FileKind, val by: String, val where: String) {
+/** What a file name says about its content: readable text, something else, or nothing certain. */
+enum class Look { TEXT, BINARY, UNKNOWN }
+
+/**
+ * A link to a file in a text, where [by] wrote it and [where] it stands ("the first post", "a comment").
+ * [post] is the place of that post on the page: 0 is the first post, 1 the first comment, 2 the second, and so on.
+ */
+data class FileLink(
+    val url: String,
+    val name: String,
+    val kind: FileKind,
+    val by: String,
+    val where: String,
+    val post: Int = 0,
+) {
     val installable: Boolean get() = kind == FileKind.BUILD
 
-    /** A log, a note or a text: shown in a window of the app instead of being downloaded. */
-    val isText: Boolean get() = kind == FileKind.OTHER && TextFiles.isText(name)
+    /** What the name says about the content (a file behind a sign-in cannot be read at all). */
+    val look: Look get() = if (kind == FileKind.NEEDS_LOGIN) Look.BINARY else TextFiles.byName(name)
+
+    /** A log, a note, a script: shown in a window of the app instead of being downloaded. Decided by the name alone. */
+    val isText: Boolean get() = look == Look.TEXT
 }
 
+/**
+ * Which files can be read as text. The name decides when it is clear ([byName]); for the rest the first bytes of the
+ * file are looked at ([sniff]), so that a script or a log with an unusual name is found too.
+ */
 object TextFiles {
-    private val EXT = listOf(".log", ".md", ".txt")
+    private val TEXT = setOf(
+        // logs, notes, data
+        "log", "md", "markdown", "txt", "text", "rst", "adoc", "org", "tex", "csv", "tsv", "json", "jsonl", "json5",
+        "xml", "yaml", "yml", "toml", "ini", "conf", "cfg", "config", "env", "properties", "plist", "reg", "inf",
+        "srt", "vtt", "po", "pot", "lst", "ldif", "sum", "sha256", "md5", "err", "rules", "service", "desktop", "rc",
+        "startup",
+        // scripts and source
+        "sh", "bash", "zsh", "ash", "bat", "cmd", "ps1", "psm1", "vbs", "py", "pyw", "pl", "pm", "rb", "php", "lua",
+        "js", "mjs", "ts", "tsx", "jsx", "css", "scss", "sql", "go", "rs", "swift", "c", "h", "cc", "cpp", "cxx", "hpp",
+        "hh", "hxx", "cs", "java", "kt", "kts", "gradle", "asm", "s", "inc", "ld", "mk", "cmake", "make", "patch", "diff",
+        "gitignore", "gitattributes", "editorconfig",
+    )
+    private val BINARY = setOf(
+        "zip", "nbtpkg", "7z", "tar", "gz", "tgz", "bz2", "xz", "zst", "rar", "apk", "aab", "jar", "war", "ipk", "deb",
+        "rpm", "dmg", "msi", "iso", "img", "qcow2", "vdi", "so", "a", "o", "obj", "dll", "exe", "bin", "dex", "class",
+        "elf", "pyc", "pdf", "png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "heic", "mp3", "mp4", "m4a", "mov",
+        "mkv", "avi", "webm", "wav", "ogg", "flac", "db", "sqlite", "sqlite3", "dmp", "pcap", "pcapng", "dlt", "doc",
+        "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "ttf", "otf", "woff", "woff2",
+    )
+    private val NAMES = setOf(
+        "makefile", "dockerfile", "readme", "license", "licence", "changelog", "authors", "copying", "notice", "todo",
+        "cmakelists", "rakefile", "gemfile", "procfile",
+    )
 
-    fun isText(name: String): Boolean = EXT.any { name.lowercase().endsWith(it) }
+    // a browser adds " (1)" to a copy; a rotated log ends in ".1", ".old" or a date
+    private val COPY = Regex("""\s*\(\d+\)(?=(\.[^./\\]*)?$)""")
+    private val ROTATED = Regex("""(\.(\d+|old|bak|orig|\d{4}-\d{2}-\d{2}))+$""")
+
+    /** How many bytes of a file are looked at to tell whether it is text. */
+    const val SAMPLE = 8192
+
+    fun byName(name: String): Look {
+        val n = ROTATED.replace(COPY.replace(name.trim().lowercase(), ""), "")
+        val dot = n.lastIndexOf('.')
+        val ext = if (dot in 0 until n.length - 1) n.substring(dot + 1) else ""
+        return when {
+            ext in TEXT -> Look.TEXT
+            ext in BINARY -> Look.BINARY
+            ext.isEmpty() && n in NAMES -> Look.TEXT
+            else -> Look.UNKNOWN
+        }
+    }
+
+    fun isText(name: String): Boolean = byName(name) == Look.TEXT
+
+    private val MAGIC = listOf(
+        byteArrayOf(0x50, 0x4B, 0x03, 0x04), byteArrayOf(0x1F, 0x8B.toByte()), byteArrayOf(0x7F, 0x45, 0x4C, 0x46),
+        byteArrayOf(0x25, 0x50, 0x44, 0x46), byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47),
+        byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte()), byteArrayOf(0x47, 0x49, 0x46, 0x38),
+        byteArrayOf(0x37, 0x7A, 0xBC.toByte(), 0xAF.toByte(), 0x27, 0x1C), byteArrayOf(0x52, 0x61, 0x72, 0x21),
+        "SQLite format 3".toByteArray(Charsets.ISO_8859_1),
+    )
+
+    private fun startsWith(b: ByteArray, p: ByteArray) = b.size >= p.size && p.indices.all { b[it] == p[it] }
+
+    private fun utf16Bom(b: ByteArray) =
+        b.size >= 2 && ((b[0] == 0xFF.toByte() && b[1] == 0xFE.toByte()) || (b[0] == 0xFE.toByte() && b[1] == 0xFF.toByte()))
+
+    /**
+     * True when the first bytes of a file look like text: no zero bytes, hardly any control characters, not a web page,
+     * not a known kind of archive or picture. A text in UTF-16 (it starts with a byte order mark) counts too.
+     */
+    fun sniff(bytes: ByteArray): Boolean {
+        val n = minOf(bytes.size, SAMPLE)
+        if (n == 0) return true
+        if (utf16Bom(bytes)) return true
+        if (MAGIC.any { startsWith(bytes, it) }) return false
+        if (Links.looksLikePage(bytes)) return false
+        var control = 0
+        for (i in 0 until n) {
+            val b = bytes[i].toInt() and 0xFF
+            if (b == 0) return false
+            // tab, line feed, form feed, carriage return and ESC (colours in a log) are normal in a text
+            if (b < 0x20 && b != 9 && b != 10 && b != 12 && b != 13 && b != 27) control++
+        }
+        return control * 100 <= n
+    }
+
+    private fun validUtf8(bytes: ByteArray, cut: Boolean): Boolean {
+        val dec = Charsets.UTF_8.newDecoder()
+            .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+            .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+        val input = java.nio.ByteBuffer.wrap(bytes)
+        val out = java.nio.CharBuffer.allocate(8192)
+        while (true) {
+            // for a file that was read only in part, a character cut off at the end is no error
+            val r = dec.decode(input, out, !cut)
+            if (r.isError) return false
+            if (r.isUnderflow) return true
+            out.clear()
+        }
+    }
+
+    /**
+     * The text of a file's bytes: UTF-16 with a byte order mark, UTF-8, or else Windows-1252. Line breaks become "\n".
+     * [cut] says that only the start of the file was read, so its last character may be incomplete.
+     */
+    fun decode(bytes: ByteArray, cut: Boolean = false): String {
+        val t = when {
+            bytes.size >= 2 && bytes[0] == 0xFF.toByte() && bytes[1] == 0xFE.toByte() ->
+                String(bytes, 2, bytes.size - 2, Charsets.UTF_16LE)
+            bytes.size >= 2 && bytes[0] == 0xFE.toByte() && bytes[1] == 0xFF.toByte() ->
+                String(bytes, 2, bytes.size - 2, Charsets.UTF_16BE)
+            validUtf8(bytes, cut) -> String(bytes, Charsets.UTF_8)
+            else -> String(bytes, charset("windows-1252"))
+        }
+        return t.removePrefix("\uFEFF").replace("\r\n", "\n").replace('\r', '\n')
+    }
 }
 
 /** A short digest made on the phone from the words of a page, and the links in it. Not an AI summary. */
@@ -146,7 +271,7 @@ object Links {
     }
 
     /** The file [url] points at, or null when it is a page, a picture or something else. */
-    fun file(url: String, by: String, where: String): FileLink? {
+    fun file(url: String, by: String, where: String, post: Int = 0): FileLink? {
         if (!url.startsWith("https://")) return null
         if (isPicture(url)) return null
         val h = host(url)
@@ -160,17 +285,17 @@ object Links {
                 Regex("""^[^/]+/[^/]+/raw/""").containsMatchIn(p)
             ) || h == "raw.githubusercontent.com" || h.endsWith("objects.githubusercontent.com")
         if (h == "github.com" && Regex("""^[^/]+/[^/]+/actions/runs/\d+/artifacts/\d+""").containsMatchIn(p)) {
-            return FileLink(url, "build artifact of an Actions run", FileKind.NEEDS_LOGIN, by, where)
+            return FileLink(url, "build artifact of an Actions run", FileKind.NEEDS_LOGIN, by, where, post)
         }
         val archive = ARCHIVE.any { lower.endsWith(it) }
         if (!isFileUrl && !archive) return null
         val build = lower.endsWith(".zip") || lower.endsWith(".nbtpkg") || Names.canonical(name) != null || Names.isContainer(name)
-        return FileLink(url, name, if (build) FileKind.BUILD else FileKind.OTHER, by, where)
+        return FileLink(url, name, if (build) FileKind.BUILD else FileKind.OTHER, by, where, post)
     }
 
     /** The files linked in a text. */
-    fun files(text: String, by: String, where: String): List<FileLink> =
-        find(text).mapNotNull { file(it, by, where) }.distinctBy { it.url }
+    fun files(text: String, by: String, where: String, post: Int = 0): List<FileLink> =
+        find(text).mapNotNull { file(it, by, where, post) }.distinctBy { it.url }
 
     /** True when what came back is a web page (a sign-in page, say) and not the file that was asked for. */
     fun looksLikePage(bytes: ByteArray): Boolean {
@@ -259,11 +384,11 @@ object Digest {
         return Summary(lines, files.map { it.url }.take(8) + pages)
     }
 
-    /** The files linked in the first post and the comments. */
+    /** The files linked in the first post and the comments, each with the place of the post it was first shared in. */
     fun filesOf(t: Topic, comments: List<Comment>): List<FileLink> {
         val out = ArrayList<FileLink>()
-        out += Links.files(t.body, t.author, "the first post")
-        for (c in comments) out += Links.files(c.body, c.author, "a comment on ${c.created.take(10)}")
+        out += Links.files(t.body, t.author, "the first post", 0)
+        comments.forEachIndexed { i, c -> out += Links.files(c.body, c.author, "a comment on ${c.created.take(10)}", i + 1) }
         return out.distinctBy { it.url }
     }
 }

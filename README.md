@@ -71,9 +71,21 @@ small squares under that post. A tap opens a full-screen gallery that holds only
 always know which post they belong to: swipe left and right for the previous and next one, pinch or double-tap to zoom,
 drag while zoomed; the top bar shows "2 / 5", the post (first post, or the comment and who wrote it) and OPEN IN BROWSER.
 Pictures are loaded into memory only and nothing is saved on the phone (if a picture cannot be decoded, for example a
-video, the tile says so and the browser button opens it). A shared **.log, .md or .txt** file has **VIEW**: it opens in a
-small window in the middle of the screen (70% of the width and height at most) with small, scrollable text and **COPY**
-at the top right, to paste it into an AI chat; the first 800 KB are read, nothing is saved on the phone. **QUICK SUMMARY** gives a short digest made on the
+video, the tile says so and the browser button opens it).
+
+**Files.** The card **Files shared on this page** is the quick list: a file's name and the buttons that fit it, nothing
+more. **VIEW POST** scrolls the page to the post that shared the file (the first post, or that comment) and tints it for a
+moment. The same buttons stand under the line that links the file in the post itself, with more room between several
+files one after another: **VIEW** for a readable text, **GET FOR INSTALL** for a build file, **OPEN IN BROWSER** for a file
+nothing else can be done with. A file is readable when its name says so (a long list: logs, notes, json, xml, yaml, ini,
+conf, scripts and source code such as .sh .py .c .cpp .h .kt .java .js, patches and so on, also rotated logs such as
+`app.log.1`) or, when the name says nothing (no extension, an unusual one), when the app has looked at the first 8 KB of
+it ("looking into the file…", a small request, nothing is saved): no zero bytes, hardly any control characters, no web
+page and no known archive or picture header. Archives, apps, libraries and pictures are never offered. **VIEW** opens a
+small window in the middle of the screen (70% of the width and height at most) with small monospace text. Lines are
+**not wrapped**, so a log keeps its formatting: the text scrolls down and sideways, each way with a scrollbar you can
+drag (or touch to jump to a place in the file), and **COPY** at the top right copies the whole text to paste it into an
+AI chat. UTF-8, UTF-16 and old 8-bit texts are read; the first 800 KB are shown, nothing is saved on the phone. **QUICK SUMMARY** gives a short digest made on the
 phone from the words of the page (who wrote it, the first lines, the latest comment, the settings and files it names,
 its links); it is not an AI summary. **SUMMARIZE WITH AI** has Claude (`claude-haiku-5-5`, Anthropic) write the summary
 from the first post and the comments, with the links, files and settings of the page. It needs your own Anthropic API

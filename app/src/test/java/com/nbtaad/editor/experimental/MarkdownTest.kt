@@ -282,12 +282,68 @@ class MarkdownTest {
         assertTrue(Links.file("https://github.com/user-attachments/files/125/out.txt", "me", "a")!!.isText)
         val zip = Links.file("https://github.com/user-attachments/files/126/build.zip", "me", "a")!!
         assertFalse(zip.isText)
-        assertFalse(Links.file("https://github.com/user-attachments/files/127/data.csv", "me", "a")!!.isText)
+        // many more kinds are text: data, scripts, source
+        assertTrue(Links.file("https://github.com/user-attachments/files/127/data.csv", "me", "a")!!.isText)
+        assertTrue(Links.file("https://github.com/user-attachments/files/128/make_db.py", "me", "a")!!.isText)
+        assertFalse(Links.file("https://github.com/user-attachments/files/129/libNbtAad.so", "me", "a")!!.isText)
         // pictures are not files
         assertEquals(null, Links.file("https://github.com/user-attachments/assets/abc", "me", "a"))
         assertTrue(Links.isImage("https://github.com/user-attachments/assets/abc"))
         assertTrue(Links.isImage("https://x.test/a.PNG?raw=1"))
         assertFalse(Links.isImage("https://x.test/video.mp4"))
         assertFalse(Links.isImage("https://x.test/vector.svg"))
+    }
+
+    private val isFile = { u: String -> Links.file(u, "", "") != null }
+    private val F1 = "https://github.com/user-attachments/files/1/make_db.py"
+    private val F2 = "https://github.com/user-attachments/files/2/tr.txt"
+
+    @Test
+    fun everyLineThatLinksAFileStandsApart() {
+        val para = Markdown.parse("[make_db.py]($F1)\n[tr.txt]($F2)\nHello, I translated these.\nPlease review.")[0] as MdBlock.Para
+        val pieces = Markdown.pieces(para.spans, isFile)
+        assertEquals(3, pieces.size)
+        assertEquals(listOf(F1), pieces[0].files)
+        assertEquals("make_db.py", Markdown.plain(pieces[0].spans))
+        assertEquals(listOf(F2), pieces[1].files)
+        assertEquals(emptyList<String>(), pieces[2].files)
+        assertEquals("Hello, I translated these.\nPlease review.", Markdown.plain(pieces[2].spans))
+    }
+
+    @Test
+    fun textAroundFilesStaysTogetherAndOtherLinksAreNoFiles() {
+        val para = Markdown.parse("intro\nsee [log]($F2) now\nmore\nand [the page](https://example.com/x)")[0] as MdBlock.Para
+        val pieces = Markdown.pieces(para.spans, isFile)
+        assertEquals(listOf(emptyList(), listOf(F2), emptyList()), pieces.map { it.files })
+        assertEquals("intro", Markdown.plain(pieces[0].spans))
+        assertEquals("see log now", Markdown.plain(pieces[1].spans))
+        assertEquals("more\nand the page", Markdown.plain(pieces[2].spans))
+        // no file, one piece, as it was
+        val plain = Markdown.parse("just text\nand more")[0] as MdBlock.Para
+        assertEquals(1, Markdown.pieces(plain.spans, isFile).size)
+        assertEquals(emptyList<MdPiece>(), Markdown.pieces(emptyList(), isFile))
+    }
+
+    @Test
+    fun aLineWithTwoFilesAsksForBoth() {
+        val para = Markdown.parse("[a]($F1) and [b]($F2) and [a again]($F1)")[0] as MdBlock.Para
+        val pieces = Markdown.pieces(para.spans, isFile)
+        assertEquals(1, pieces.size)
+        assertEquals(listOf(F1, F2), pieces[0].files)
+    }
+
+    @Test
+    fun aBareFileAddressCountsAsALinkToo() {
+        val para = Markdown.parse("log: $F2\nthanks")[0] as MdBlock.Para
+        val pieces = Markdown.pieces(para.spans, isFile)
+        assertEquals(listOf(listOf(F2), emptyList()), pieces.map { it.files })
+    }
+
+    @Test
+    fun spansAreCutIntoLines() {
+        val lines = Markdown.lines(Markdown.inline("one\ntwo **three\nfour**\n"))
+        assertEquals(listOf("one", "two three", "four"), lines.map { Markdown.plain(it) })
+        assertTrue(lines[2].all { it.bold })
+        assertEquals(0, Markdown.lines(emptyList()).size)
     }
 }

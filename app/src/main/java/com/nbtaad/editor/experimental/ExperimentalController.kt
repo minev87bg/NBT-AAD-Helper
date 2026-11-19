@@ -2,6 +2,7 @@ package com.nbtaad.editor.experimental
 
 import android.content.Context
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.nbtaad.editor.install.SourceFile
@@ -10,6 +11,8 @@ import com.nbtaad.editor.net.Online
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 
@@ -71,6 +74,18 @@ class ExperimentalController(
     var textDoc by mutableStateOf<TextDoc?>(null); private set
     var textBusy by mutableStateOf(false); private set
     var textMessage by mutableStateOf(""); private set
+
+    /** The address of the file that VIEW was last pressed for: the busy sign and the message belong under its buttons. */
+    var textFor by mutableStateOf(""); private set
+
+    /** The address of the file that GET FOR INSTALL was last pressed for. */
+    var downloadFor by mutableStateOf(""); private set
+
+    // files whose name does not say what they are: the first bytes were looked at, true when they are readable text
+    private val looked = mutableStateMapOf<String, Boolean>()
+    private val lookFailed: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+    private val looking: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+    private val lookGate = Semaphore(3)
     var gallery by mutableStateOf<Gallery?>(null); private set
 
     private val commentCache = HashMap<Int, List<Comment>>()
@@ -160,6 +175,8 @@ class ExperimentalController(
         aiMessage = ""
         textDoc = null
         textMessage = ""
+        textFor = ""
+        downloadFor = ""
         gallery = null
         val cached = commentCache[t.number]
         when {
@@ -198,10 +215,47 @@ class ExperimentalController(
         gallery = null
     }
 
+    /**
+     * Can this file be read in the app's text window? True or false, or null while the app is still looking into a file
+     * whose name does not tell.
+     */
+    fun readable(link: FileLink): Boolean? = when (link.look) {
+        Look.TEXT -> true
+        Look.BINARY -> false
+        Look.UNKNOWN -> looked[link.url]
+    }
+
+    /**
+     * Looks into the files whose name does not say what they are (a few KB of each, nothing is saved), so that VIEW
+     * is offered for every file that holds readable text. A file that could not be looked into counts as not readable
+     * until the page is opened again.
+     */
+    fun checkFiles(files: List<FileLink>) {
+        for (f in files) {
+            if (f.look != Look.UNKNOWN) continue
+            if (looked.containsKey(f.url) && f.url !in lookFailed) continue
+            if (!looking.add(f.url)) continue
+            scope.launch(Dispatchers.IO) {
+                try {
+                    val ok = lookGate.withPermit { IssuesApi.looksReadable(ctx, f) }
+                    lookFailed.remove(f.url)
+                    looked[f.url] = ok
+                } catch (e: Exception) {
+                    AppLog.w("Experimental", "Could not look into ${f.name}: ${e.javaClass.simpleName}: ${e.message}")
+                    lookFailed.add(f.url)
+                    looked[f.url] = false
+                } finally {
+                    looking.remove(f.url)
+                }
+            }
+        }
+    }
+
     /** Opens a log, note or text in a window: it is read into memory, nothing is saved on the phone. */
     fun viewText(link: FileLink) {
-        if (textBusy || !link.isText) return
+        if (textBusy || readable(link) != true) return
         textBusy = true
+        textFor = link.url
         textMessage = ""
         scope.launch(Dispatchers.IO) {
             try {
@@ -305,6 +359,7 @@ class ExperimentalController(
         val t = selected ?: return
         if (downloadBusy || !link.installable) return
         downloadBusy = true
+        downloadFor = link.url
         downloadError = false
         downloadMessage = "Downloading ${link.name}…"
         scope.launch(Dispatchers.IO) {

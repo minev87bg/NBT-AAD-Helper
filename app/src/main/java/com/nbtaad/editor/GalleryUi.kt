@@ -3,13 +3,18 @@ package com.nbtaad.editor
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,15 +22,21 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -46,7 +57,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
@@ -58,8 +71,14 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -81,21 +100,36 @@ import kotlinx.coroutines.launch
 
 /**
  * A log, note or text in a small window in the middle of the screen (at most 70% of its width and height): small
- * monospace text that scrolls, and COPY at the top right to paste it somewhere else (into an AI chat, say).
- * The file is read into memory only; nothing is saved on the phone.
+ * monospace text, lines not wrapped, scrolling down and sideways with a scrollbar for each direction, and COPY at the
+ * top right to paste it somewhere else (into an AI chat, say). The file is read into memory only; nothing is saved
+ * on the phone.
  */
 @Composable
 internal fun TextFileDialog(doc: ExperimentalController.TextDoc, onClose: () -> Unit) {
     val cfg = LocalConfiguration.current
+    val density = LocalDensity.current
     val maxW = (cfg.screenWidthDp * 0.7f).dp
     val maxH = (cfg.screenHeightDp * 0.7f).dp
     val clip = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
+    val muted = MaterialTheme.colorScheme.onSurfaceVariant
     var copied by remember { mutableStateOf("") }
-    // shown in pieces of 40 lines, so a long log scrolls smoothly; a very long single line is cut for the display only
-    val chunks = remember(doc) {
-        doc.text.lines().map { if (it.length > 4000) it.take(4000) + "…" else it }.chunked(40).map { it.joinToString("\n") }
+    // a very long single line is cut for the display only (COPY still copies everything that was read)
+    val lines = remember(doc) {
+        doc.text.lines().map { l -> l.replace("\t", "    ").let { if (it.length > 4000) it.take(4000) + "…" else it } }
     }
+    // shown in pieces of 40 lines, so a long log scrolls smoothly
+    val chunks = remember(lines) { lines.chunked(40).map { it.joinToString("\n") } }
+    // lines are not wrapped: the text is as wide as its widest line, and the whole text scrolls sideways together
+    val style = remember { TextStyle(fontFamily = FontFamily.Monospace, fontSize = 10.sp, lineHeight = 13.sp) }
+    val measurer = rememberTextMeasurer()
+    val textW = remember(lines) {
+        val widest = lines.maxByOrNull { it.length } ?: ""
+        with(density) { measurer.measure(widest, style, softWrap = false).size.width.toDp() }
+    }
+    val contentW = maxOf(maxW, textW + 32.dp).coerceAtMost(with(density) { 200000f.toDp() })
+    val down = rememberLazyListState()
+    val across = rememberScrollState()
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(
             Modifier.width(maxW).heightIn(max = maxH),
@@ -105,9 +139,13 @@ internal fun TextFileDialog(doc: ExperimentalController.TextDoc, onClose: () -> 
             Column {
                 Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        doc.name,
+                        buildAnnotatedString {
+                            withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) { append(doc.name) }
+                            withStyle(SpanStyle(fontSize = 10.sp, color = muted)) {
+                                append("  ·  ${lines.size} line${if (lines.size == 1) "" else "s"}")
+                            }
+                        },
                         fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),
@@ -128,28 +166,164 @@ internal fun TextFileDialog(doc: ExperimentalController.TextDoc, onClose: () -> 
                     ) { Text(copied.ifEmpty { "COPY" }, fontSize = 12.sp) }
                 }
                 HorizontalDivider(color = MaterialTheme.colorScheme.outline)
-                LazyColumn(
-                    Modifier.weight(1f, fill = false).padding(horizontal = 12.dp),
-                    contentPadding = PaddingValues(vertical = 8.dp),
-                ) {
-                    if (chunks.isEmpty() || doc.text.isBlank()) {
-                        item { Text("(the file is empty)", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                    }
-                    items(chunks) { c ->
-                        Text(c, fontFamily = FontFamily.Monospace, fontSize = 10.sp, lineHeight = 13.sp)
-                    }
-                    if (doc.cut) {
-                        item {
-                            Text(
-                                "Only the first 800 KB are shown and copied. Open the file in the browser for the rest.",
-                                fontSize = 10.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(top = 8.dp),
-                            )
+                Box(Modifier.weight(1f, fill = false)) {
+                    Box(Modifier.horizontalScroll(across)) {
+                        LazyColumn(
+                            Modifier.width(contentW),
+                            state = down,
+                            contentPadding = PaddingValues(start = 12.dp, end = 16.dp, top = 8.dp, bottom = 16.dp),
+                        ) {
+                            if (chunks.isEmpty() || doc.text.isBlank()) {
+                                item { Text("(the file is empty)", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                            }
+                            items(chunks) { c ->
+                                Text(c, style = style, softWrap = false)
+                            }
+                            if (doc.cut) {
+                                item {
+                                    Text(
+                                        "Only the first 800 KB are shown and copied. Open the file in the browser for the rest.",
+                                        fontSize = 10.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(top = 8.dp).widthIn(max = maxW - 44.dp),
+                                    )
+                                }
+                            }
                         }
+                    }
+                    // the scrollbars lie over the text: drag one, or touch it, to go to a place in the file
+                    Box(Modifier.matchParentSize()) {
+                        DownScrollbar(down, Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(24.dp).padding(bottom = 14.dp))
+                        AcrossScrollbar(across, Modifier.align(Alignment.BottomStart).fillMaxWidth().height(14.dp).padding(end = 24.dp))
                     }
                 }
             }
+        }
+    }
+}
+
+// the size of what is shown in the list, worked out from the items on the screen (the pieces of a file are all alike)
+private class ListSize(val piece: Float, val content: Float, val viewport: Float)
+
+private fun listSize(state: LazyListState): ListSize? {
+    val info = state.layoutInfo
+    val shown = info.visibleItemsInfo
+    if (info.totalItemsCount == 0 || shown.isEmpty()) return null
+    val piece = shown.maxOf { it.size }.toFloat()
+    val content = piece * info.totalItemsCount
+    val viewport = info.viewportSize.height.toFloat()
+    return if (content <= viewport + 1f) null else ListSize(piece, content, viewport)
+}
+
+/** The top and the height of the thumb on a track [track] long. */
+private fun listThumb(state: LazyListState, m: ListSize, track: Float, minThumb: Float): Pair<Float, Float> {
+    val h = (track * m.viewport / m.content).coerceIn(minOf(minThumb, track), track)
+    val frac = when {
+        !state.canScrollBackward -> 0f
+        !state.canScrollForward -> 1f
+        else -> ((state.firstVisibleItemIndex * m.piece + state.firstVisibleItemScrollOffset) / (m.content - m.viewport)).coerceIn(0f, 1f)
+    }
+    return (frac * (track - h)) to h
+}
+
+/** The scrollbar at the right edge of the text. */
+@Composable
+private fun DownScrollbar(state: LazyListState, modifier: Modifier) {
+    val scope = rememberCoroutineScope()
+    val scale = LocalDensity.current.density
+    val color = MaterialTheme.colorScheme.onSurface
+    var track by remember { mutableFloatStateOf(0f) }
+    var active by remember { mutableStateOf(false) }
+    fun jump(y: Float) {
+        val m = listSize(state) ?: return
+        val (_, h) = listThumb(state, m, track, 36f * scale)
+        if (track - h < 1f) return
+        val frac = ((y - h / 2f) / (track - h)).coerceIn(0f, 1f)
+        val pos = frac * (m.content - m.viewport)
+        val index = (pos / m.piece).toInt().coerceIn(0, state.layoutInfo.totalItemsCount - 1)
+        val offset = (pos - index * m.piece).toInt().coerceAtLeast(0)
+        scope.launch { state.scrollToItem(index, offset) }
+    }
+    Box(
+        modifier
+            .onSizeChanged { track = it.height.toFloat() }
+            .pointerInput(Unit) { detectTapGestures { jump(it.y) } }
+            .pointerInput(Unit) {
+                detectVerticalDragGestures(
+                    onDragStart = {
+                        active = true
+                        jump(it.y)
+                    },
+                    onDragEnd = { active = false },
+                    onDragCancel = { active = false },
+                    onVerticalDrag = { change, _ ->
+                        change.consume()
+                        jump(change.position.y)
+                    },
+                )
+            },
+    ) {
+        Canvas(Modifier.fillMaxSize()) {
+            val m = listSize(state) ?: return@Canvas
+            val (top, h) = listThumb(state, m, size.height, 36.dp.toPx())
+            val w = (if (active) 6.dp else 4.dp).toPx()
+            drawRoundRect(
+                color.copy(alpha = if (active) 0.75f else 0.4f),
+                topLeft = Offset(size.width - w - 3.dp.toPx(), top),
+                size = Size(w, h),
+                cornerRadius = CornerRadius(w / 2f),
+            )
+        }
+    }
+}
+
+/** The scrollbar along the bottom edge of the text: the text is not wrapped, so long lines are reached by it. */
+@Composable
+private fun AcrossScrollbar(state: ScrollState, modifier: Modifier) {
+    val scope = rememberCoroutineScope()
+    val scale = LocalDensity.current.density
+    val color = MaterialTheme.colorScheme.onSurface
+    var track by remember { mutableFloatStateOf(0f) }
+    var active by remember { mutableStateOf(false) }
+    fun jump(x: Float) {
+        val max = state.maxValue
+        if (max <= 0 || max == Int.MAX_VALUE || track <= 0f) return
+        val w = (track * track / (track + max)).coerceIn(minOf(36f * scale, track), track)
+        if (track - w < 1f) return
+        val frac = ((x - w / 2f) / (track - w)).coerceIn(0f, 1f)
+        scope.launch { state.scrollTo((frac * max).toInt()) }
+    }
+    Box(
+        modifier
+            .onSizeChanged { track = it.width.toFloat() }
+            .pointerInput(Unit) { detectTapGestures { jump(it.x) } }
+            .pointerInput(Unit) {
+                detectHorizontalDragGestures(
+                    onDragStart = {
+                        active = true
+                        jump(it.x)
+                    },
+                    onDragEnd = { active = false },
+                    onDragCancel = { active = false },
+                    onHorizontalDrag = { change, _ ->
+                        change.consume()
+                        jump(change.position.x)
+                    },
+                )
+            },
+    ) {
+        Canvas(Modifier.fillMaxSize()) {
+            val max = state.maxValue
+            if (max <= 0 || max == Int.MAX_VALUE) return@Canvas
+            val w = (size.width * size.width / (size.width + max)).coerceIn(minOf(36.dp.toPx(), size.width), size.width)
+            val left = state.value.toFloat() / max * (size.width - w)
+            val t = (if (active) 6.dp else 4.dp).toPx()
+            drawRoundRect(
+                color.copy(alpha = if (active) 0.75f else 0.4f),
+                topLeft = Offset(left, size.height - t - 3.dp.toPx()),
+                size = Size(w, t),
+                cornerRadius = CornerRadius(t / 2f),
+            )
         }
     }
 }

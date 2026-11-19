@@ -22,6 +22,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -43,6 +44,8 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nbtaad.editor.experimental.CodeColors
+import com.nbtaad.editor.experimental.FileLink
+import com.nbtaad.editor.experimental.Links
 import com.nbtaad.editor.experimental.Markdown
 import com.nbtaad.editor.experimental.MdAlign
 import com.nbtaad.editor.experimental.MdBlock
@@ -81,11 +84,24 @@ private fun mdColors(): MdColors {
     }
 }
 
-/** Text written in Markdown, drawn the way GitHub draws it: headings, lists, tables, code, quotes, links. */
+/** What a post shows under a line that links a file: the buttons that fit the file. Null where there is nothing to show. */
+private val LocalFileActions = compositionLocalOf<(@Composable (FileLink) -> Unit)?> { null }
+
+/**
+ * Text written in Markdown, drawn the way GitHub draws it: headings, lists, tables, code, quotes, links.
+ * With [fileActions] every line that links a file gets room around it and the actions for that file under it.
+ */
 @Composable
-fun MarkdownView(blocks: List<MdBlock>, modifier: Modifier = Modifier, size: TextUnit = 13.sp) {
+fun MarkdownView(
+    blocks: List<MdBlock>,
+    modifier: Modifier = Modifier,
+    size: TextUnit = 13.sp,
+    fileActions: (@Composable (FileLink) -> Unit)? = null,
+) {
     val c = mdColors()
-    MdBlocks(blocks, c, size, 0, modifier)
+    CompositionLocalProvider(LocalFileActions provides fileActions) {
+        MdBlocks(blocks, c, size, 0, modifier)
+    }
 }
 
 @Composable
@@ -123,7 +139,13 @@ private fun styled(spans: List<MdSpan>, c: MdColors, size: TextUnit): AnnotatedS
 private fun MdBlockView(b: MdBlock, c: MdColors, size: TextUnit, level: Int) {
     when (b) {
         is MdBlock.Para -> if (b.spans.any { !it.picture && it.text.isNotBlank() }) {
-            Text(styled(b.spans, c, size), fontSize = size, lineHeight = size * 1.5f)
+            val actions = LocalFileActions.current
+            val hasFile = actions != null && b.spans.any { s -> !s.picture && s.link?.let { Links.file(it, "", "") } != null }
+            if (actions != null && hasFile) {
+                FileParagraph(b, c, size, actions)
+            } else {
+                Text(styled(b.spans, c, size), fontSize = size, lineHeight = size * 1.5f)
+            }
         }
 
         is MdBlock.Heading -> {
@@ -208,6 +230,36 @@ private fun MdBlockView(b: MdBlock, c: MdColors, size: TextUnit, level: Int) {
         is MdBlock.Table -> MdTable(b, c, size)
 
         MdBlock.Rule -> HorizontalDivider(color = c.border)
+    }
+}
+
+/** A paragraph with files in it: each line that links a file stands apart, with the file's buttons under it. */
+@Composable
+private fun FileParagraph(b: MdBlock.Para, c: MdColors, size: TextUnit, actions: @Composable (FileLink) -> Unit) {
+    val pieces = remember(b) { Markdown.pieces(b.spans) { Links.file(it, "", "") != null } }
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        for (p in pieces) {
+            if (p.files.isEmpty()) {
+                if (p.spans.any { !it.picture && it.text.isNotBlank() }) {
+                    Text(styled(p.spans, c, size), fontSize = size, lineHeight = size * 1.5f)
+                }
+            } else {
+                Column(Modifier.padding(vertical = 6.dp)) {
+                    if (p.spans.any { !it.picture && it.text.isNotBlank() }) {
+                        Text(styled(p.spans, c, size), fontSize = size, lineHeight = size * 1.5f)
+                    }
+                    for (url in p.files) {
+                        val f = remember(url) { Links.file(url, "", "") }
+                        if (f != null) {
+                            if (p.files.size > 1) {
+                                Text(f.name, fontSize = 11.sp, color = c.muted, fontFamily = FontFamily.Monospace, modifier = Modifier.padding(top = 4.dp))
+                            }
+                            actions(f)
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

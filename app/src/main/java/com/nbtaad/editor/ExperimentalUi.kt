@@ -3,9 +3,13 @@ package com.nbtaad.editor
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -18,7 +22,10 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
@@ -30,9 +37,12 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -41,6 +51,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -56,6 +67,8 @@ import com.nbtaad.editor.experimental.Mentions
 import com.nbtaad.editor.experimental.Markdown
 import com.nbtaad.editor.experimental.Topic
 import com.nbtaad.editor.install.ReleaseLogic
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /** The Experimental page: the project's issues and pull requests, and what people share in them. */
 @Composable
@@ -259,8 +272,22 @@ private fun TopicDetail(vm: MainViewModel, t: Topic) {
     val settings = remember(t, comments) {
         Mentions.settings(listOf(t.body) + (comments ?: emptyList()).map { it.body })
     }
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    // the post VIEW POST jumped to is tinted for a moment, so the eye finds where it landed
+    var flash by remember(t) { mutableIntStateOf(-1) }
+    LaunchedEffect(flash) {
+        if (flash >= 0) {
+            delay(2200)
+            flash = -1
+        }
+    }
+    // files whose name does not say what they are are looked into, so VIEW is offered for every readable one
+    LaunchedEffect(files) { exp.checkFiles(files) }
+    val fileActions: @Composable (FileLink) -> Unit = { f -> FileActions(exp, f, onOpen = { openLink(uri, it) }) }
     LazyColumn(
         Modifier.fillMaxSize(),
+        state = listState,
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 56.dp, bottom = 24.dp),
     ) {
         item(key = "head") {
@@ -320,28 +347,45 @@ private fun TopicDetail(vm: MainViewModel, t: Topic) {
                 }
                 if (exp.commentsMessage.isNotEmpty()) Text(exp.commentsMessage, fontSize = 12.sp, color = Red)
                 exp.summary?.let { s -> SummaryCard(s.lines, s.links) { openLink(uri, it) } }
-                if (files.isNotEmpty()) FilesCard(exp, files) { openLink(uri, it) }
+                if (files.isNotEmpty()) {
+                    FilesCard(exp, files, onOpen = { openLink(uri, it) }) { post ->
+                        // the first post is the second item of the page (the head is the first), comment n the (n + 1)th
+                        val last = (listState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)
+                        scope.launch {
+                            listState.animateScrollToItem((if (post == 0) 1 else 1 + post).coerceAtMost(last))
+                            flash = post
+                        }
+                    }
+                }
                 if (settings.isNotEmpty()) SettingsCard(vm, settings)
                 Spacer(Modifier.height(10.dp))
-                val body = remember(t.body) { Markdown.parse(t.body) }
+            }
+        }
+        item(key = "post") {
+            val body = remember(t.body) { Markdown.parse(t.body) }
+            val bodyPics = remember(body) { Markdown.pictures(body) }
+            Column(
+                Modifier.fillMaxWidth().then(
+                    if (flash == 0) Modifier.background(ExperimentalAmber.copy(alpha = 0.14f), RoundedCornerShape(8.dp)) else Modifier
+                ),
+            ) {
                 if (body.isEmpty()) {
                     Text("(no text)", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 } else {
-                    MarkdownView(body)
+                    MarkdownView(body, fileActions = fileActions)
                 }
-                val bodyPics = remember(body) { Markdown.pictures(body) }
                 if (bodyPics.isNotEmpty()) {
                     PictureGrid(bodyPics, Modifier.padding(top = 10.dp)) { i ->
                         exp.openGallery("First post  ·  ${t.author}", bodyPics, i)
                     }
                 }
-                if (!comments.isNullOrEmpty()) {
-                    Spacer(Modifier.height(14.dp))
-                    Text("${comments.size} comment${if (comments.size == 1) "" else "s"}", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                }
+            }
+            if (!comments.isNullOrEmpty()) {
+                Spacer(Modifier.height(14.dp))
+                Text("${comments.size} comment${if (comments.size == 1) "" else "s"}", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
             }
         }
-        items(comments ?: emptyList()) { c -> CommentCard(exp, c) }
+        itemsIndexed(comments ?: emptyList()) { i, c -> CommentCard(exp, c, flash == i + 1, fileActions) }
     }
     if (exp.aiKeyDialog) AiKeyDialog(exp)
     exp.textDoc?.let { doc -> TextFileDialog(doc) { exp.closeText() } }
@@ -475,51 +519,92 @@ private fun SummaryCard(lines: List<String>, links: List<String>, onLink: (Strin
     }
 }
 
+/** The files of the page, short: the name and what can be done with the file. [onPost] jumps to the post that shared it. */
 @Composable
-private fun FilesCard(exp: ExperimentalController, files: List<FileLink>, onOpen: (String) -> Unit) {
+private fun FilesCard(exp: ExperimentalController, files: List<FileLink>, onOpen: (String) -> Unit, onPost: (Int) -> Unit) {
     OutlinedCard(Modifier.fillMaxWidth().padding(top = 10.dp), border = BorderStroke(2.dp, ExperimentalAmber)) {
-        Column(Modifier.padding(12.dp)) {
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
             Text("Files shared on this page", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
             Text(
-                "They come from other people. The app can check what a file is, not whether it is safe.",
+                "From other people. The app can check what a file is, not whether it is safe.",
                 fontSize = 11.sp,
                 color = Amber,
             )
             for (f in files) {
-                Spacer(Modifier.height(6.dp))
-                Text(f.name, fontSize = 13.sp, fontFamily = FontFamily.Monospace, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Text(
-                    "${f.by.ifBlank { "someone" }}, ${f.where}" +
-                        when (f.kind) {
-                            FileKind.BUILD -> ""
-                            FileKind.OTHER -> if (f.isText) ", opens in a window, nothing is saved on the phone" else ", not a build"
-                            FileKind.NEEDS_LOGIN -> ", GitHub shows it only to people who are signed in"
-                        },
+                    f.name,
+                    fontSize = 13.sp,
+                    fontFamily = FontFamily.Monospace,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 8.dp, bottom = 3.dp),
+                )
+                FileActions(exp, f, onOpen, onPost = { onPost(f.post) })
+            }
+        }
+    }
+}
+
+/**
+ * The buttons of one file, chosen by what the file is: VIEW for readable text (also for a file whose name does not say,
+ * once the app has looked into it), GET FOR INSTALL for a part of a build, OPEN IN BROWSER for the rest. In the list of
+ * files [onPost] is set and adds VIEW POST; under a link in a post the link itself opens the browser, so that button is
+ * shown there only for a file nothing else can be done with.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun FileActions(exp: ExperimentalController, f: FileLink, onOpen: (String) -> Unit, onPost: (() -> Unit)? = null) {
+    val readable = exp.readable(f)
+    Column {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            when (readable) {
+                true -> MiniButton(if (exp.textBusy && exp.textFor == f.url) "OPENING…" else "VIEW", enabled = !exp.textBusy) {
+                    exp.viewText(f)
+                }
+                null -> Text(
+                    "looking into the file…",
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(vertical = 7.dp),
                 )
-                Row {
-                    if (f.isText) {
-                        TextButton(onClick = { exp.viewText(f) }, enabled = !exp.textBusy) {
-                            Text(if (exp.textBusy) "OPENING…" else "VIEW", fontSize = 12.sp)
-                        }
-                    }
-                    if (f.installable) {
-                        TextButton(onClick = { exp.download(f) }, enabled = !exp.downloadBusy) {
-                            Text("GET FOR INSTALL", fontSize = 12.sp)
-                        }
-                    }
-                    TextButton(onClick = { onOpen(f.url) }) { Text("OPEN IN BROWSER", fontSize = 12.sp) }
-                }
+                false -> {}
             }
+            if (f.installable) {
+                MiniButton("GET FOR INSTALL", enabled = !exp.downloadBusy) { exp.download(f) }
+            }
+            if (onPost != null || (readable == false && !f.installable)) {
+                MiniButton("OPEN IN BROWSER") { onOpen(f.url) }
+            }
+            if (onPost != null) MiniButton("VIEW POST", onClick = onPost)
+        }
+        if (exp.textFor == f.url) {
             if (exp.textBusy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 4.dp))
             if (exp.textMessage.isNotEmpty()) Text(exp.textMessage, fontSize = 12.sp, color = Red)
+        }
+        if (exp.downloadFor == f.url) {
             if (exp.downloadBusy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 4.dp))
             if (exp.downloadMessage.isNotEmpty()) {
                 Text(exp.downloadMessage, fontSize = 12.sp, color = if (exp.downloadError) Red else MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }
+}
+
+/** A small outlined button: low enough to sit under a line of text without pushing the lines apart. */
+@Composable
+private fun MiniButton(text: String, enabled: Boolean = true, onClick: () -> Unit) {
+    val tint = MaterialTheme.colorScheme.primary.let { if (enabled) it else it.copy(alpha = 0.38f) }
+    val shape = RoundedCornerShape(8.dp)
+    Text(
+        text,
+        fontSize = 12.sp,
+        fontWeight = FontWeight.Medium,
+        color = tint,
+        maxLines = 1,
+        modifier = Modifier.clip(shape).border(1.dp, tint.copy(alpha = 0.55f), shape)
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 7.dp),
+    )
 }
 
 @Composable
@@ -544,12 +629,15 @@ private fun SettingsCard(vm: MainViewModel, settings: List<String>) {
 }
 
 @Composable
-private fun CommentCard(exp: ExperimentalController, c: Comment) {
+private fun CommentCard(exp: ExperimentalController, c: Comment, flash: Boolean, fileActions: @Composable (FileLink) -> Unit) {
     var expanded by remember(c) { mutableStateOf(false) }
     val full = remember(c) { Markdown.parse(c.body) }
     val short = remember(full) { Markdown.shorten(full) }
     val pics = remember(full) { Markdown.pictures(full) }
-    OutlinedCard(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+    OutlinedCard(
+        Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        border = if (flash) BorderStroke(2.dp, ExperimentalAmber) else CardDefaults.outlinedCardBorder(),
+    ) {
         Column(Modifier.padding(12.dp)) {
             Text(
                 "${c.author}  ·  ${ReleaseLogic.day(c.created)}",
@@ -561,7 +649,7 @@ private fun CommentCard(exp: ExperimentalController, c: Comment) {
             if (full.isEmpty()) {
                 Text("(no text)", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else {
-                MarkdownView(if (expanded || !short.second) full else short.first)
+                MarkdownView(if (expanded || !short.second) full else short.first, fileActions = fileActions)
             }
             if (pics.isNotEmpty()) {
                 PictureGrid(pics, Modifier.padding(top = 8.dp)) { i ->
