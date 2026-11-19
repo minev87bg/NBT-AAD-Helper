@@ -57,6 +57,8 @@ so. Errors of internet requests are never worded as car or SSH problems.
 the dark theme in the colours of GitHub's dark theme (background `#0d1117`, not black, which is easier on the eyes).
 
 ### Experimental
+The page has the amber of the EXPERIMENTAL tile's icon as its accent (chips, buttons, links, progress), and a page that shares files has a thick amber outline, a faint amber tint and a solid FILES stamp, so it is found at a glance. The Install / update tile on the choice page is a soft sage green: still the only coloured, bigger tile, but easy on the eye.
+
 Issues and pull requests of Sq00ky's project, open and closed, read from GitHub without signing in (60 requests an hour;
 the page says how many are left). Chips switch between issues and pull requests, open and closed. **SCAN FOR FILES**
 looks through the first posts and the newest 300 comments (three requests) for links to files and marks the pages that

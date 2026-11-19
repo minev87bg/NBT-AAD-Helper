@@ -97,7 +97,7 @@ fun HubScreen(vm: MainViewModel) {
                 subtitle = "Issues and builds",
                 info = "Look through the open and closed issues and pull requests of Sq00ky's project: what people " +
                     "report, test and suggest. SCAN FOR FILES marks the pages that share files (test builds), which " +
-                    "can be installed from there. SUMMARIZE gives the gist of a page and its links.",
+                    "can be installed from there. QUICK SUMMARY gives the gist of a page and its links, and SUMMARIZE WITH AI has Claude write it (with your own Anthropic key).",
                 modifier = Modifier.weight(1f),
                 onClick = { vm.chooseExperimental() },
             )
@@ -118,16 +118,16 @@ fun HubScreen(vm: MainViewModel) {
     if (vm.askDraft) DraftDialog(vm)
 }
 
-private val HeroText = Color(0xFF0C2200)
+private val HeroText = Color(0xFF0B2A14)
 private val TileShape = RoundedCornerShape(26.dp)
 
-/** The main choice: a big green tile. The (i) in its corner opens what it is for. */
+/** The main choice: a big green tile (a soft sage green, easy on the eye, but the only coloured tile). The (i) in its corner opens what it is for. */
 @Composable
 private fun HeroTile(title: String, subtitle: String, info: String, onClick: () -> Unit) {
     var showInfo by remember { mutableStateOf(false) }
     Box(
         Modifier.fillMaxWidth().height(196.dp).clip(TileShape)
-            .background(Brush.linearGradient(listOf(Color(0xFF84EE00), Color(0xFF4FB400))))
+            .background(Brush.linearGradient(listOf(Color(0xFF7BC98A), Color(0xFF4E9F5E))))
             .clickable(onClick = onClick),
     ) {
         Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.SpaceBetween) {

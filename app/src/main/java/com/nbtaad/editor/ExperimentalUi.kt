@@ -1,6 +1,7 @@
 package com.nbtaad.editor
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,6 +20,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -36,6 +38,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
@@ -59,7 +63,37 @@ fun ExperimentalScreen(vm: MainViewModel) {
     val exp = vm.exp
     val open = exp.selected
     BackHandler { if (open != null) exp.back() else vm.backToHub() }
-    if (open == null) TopicList(vm) else TopicDetail(vm, open)
+    ExperimentalTheme { if (open == null) TopicList(vm) else TopicDetail(vm, open) }
+}
+
+/** The amber of the EXPERIMENTAL tile's icon on the choice page: the accent of this whole page. */
+internal val ExperimentalAmber = Color(0xFFE9A33A)
+
+/**
+ * The page's buttons, chips, links and progress bars take the page's amber instead of the app's green, so it is
+ * recognised as the page of the amber EXPERIMENTAL tile. On the light theme the text uses a deeper amber, which stays
+ * readable on the cream background.
+ */
+@Composable
+private fun ExperimentalTheme(content: @Composable () -> Unit) {
+    val base = MaterialTheme.colorScheme
+    val dark = base.background.luminance() < 0.5f
+    val scheme = if (dark) {
+        base.copy(
+            primary = ExperimentalAmber, onPrimary = Color(0xFF0D1117),
+            primaryContainer = Color(0xFF3B2B10), onPrimaryContainer = Color(0xFFFFE2A8),
+            secondaryContainer = Color(0xFF3B2B10), onSecondaryContainer = Color(0xFFFFE2A8),
+            surfaceTint = ExperimentalAmber,
+        )
+    } else {
+        base.copy(
+            primary = Color(0xFFA66300), onPrimary = Color.White,
+            primaryContainer = Color(0xFFFFE7BD), onPrimaryContainer = Color(0xFF4A2E00),
+            secondaryContainer = Color(0xFFFFE7BD), onSecondaryContainer = Color(0xFF4A2E00),
+            surfaceTint = Color(0xFFA66300),
+        )
+    }
+    MaterialTheme(colorScheme = scheme, content = content)
 }
 
 private const val LIST_INFO =
@@ -70,9 +104,18 @@ private const val LIST_INFO =
         "Files shared in a discussion come from other people. The app can check what a file is, not whether it is safe."
 
 @Composable
-private fun Pill(text: String, color: Color) {
-    Box(Modifier.clip(CircleShape).background(color.copy(alpha = 0.16f)).padding(horizontal = 8.dp, vertical = 3.dp)) {
-        Text(text, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = color, letterSpacing = 0.5.sp)
+private fun Pill(text: String, color: Color, solid: Boolean = false) {
+    Box(
+        Modifier.clip(CircleShape).background(if (solid) color else color.copy(alpha = 0.16f))
+            .padding(horizontal = 8.dp, vertical = 3.dp),
+    ) {
+        Text(
+            text,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = if (solid) Color(0xFF0D1117) else color,
+            letterSpacing = 0.5.sp,
+        )
     }
 }
 
@@ -156,7 +199,21 @@ private fun TopicList(vm: MainViewModel) {
 @Composable
 private fun TopicRow(exp: ExperimentalController, t: Topic) {
     val files = exp.scanned[t.number]
-    OutlinedCard(onClick = { exp.select(t) }, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+    val hasFiles = !files.isNullOrEmpty()
+    val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    // a page that shares files stands out: a thick outline in the page's amber, a faint amber tint, a solid stamp
+    OutlinedCard(
+        onClick = { exp.select(t) },
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        colors = if (hasFiles) {
+            CardDefaults.outlinedCardColors(
+                containerColor = ExperimentalAmber.copy(alpha = if (dark) 0.11f else 0.16f).compositeOver(MaterialTheme.colorScheme.surface),
+            )
+        } else {
+            CardDefaults.outlinedCardColors()
+        },
+        border = if (hasFiles) BorderStroke(2.5.dp, ExperimentalAmber) else CardDefaults.outlinedCardBorder(),
+    ) {
         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(
@@ -179,7 +236,7 @@ private fun TopicRow(exp: ExperimentalController, t: Topic) {
             }
             if (!files.isNullOrEmpty()) {
                 Spacer(Modifier.padding(horizontal = 4.dp))
-                Pill("FILES ${files.size}", Green)
+                Pill("FILES ${files.size}", ExperimentalAmber, solid = true)
             }
         }
     }
@@ -412,7 +469,7 @@ private fun SummaryCard(lines: List<String>, links: List<String>, onLink: (Strin
 
 @Composable
 private fun FilesCard(exp: ExperimentalController, files: List<FileLink>, onOpen: (String) -> Unit) {
-    OutlinedCard(Modifier.fillMaxWidth().padding(top = 10.dp)) {
+    OutlinedCard(Modifier.fillMaxWidth().padding(top = 10.dp), border = BorderStroke(2.dp, ExperimentalAmber)) {
         Column(Modifier.padding(12.dp)) {
             Text("Files shared on this page", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
             Text(
