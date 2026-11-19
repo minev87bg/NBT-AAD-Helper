@@ -436,7 +436,8 @@ private fun UnitBody(inst: InstallController, u: UnitStatus, onChange: () -> Uni
     val soft = MaterialTheme.colorScheme.onSurfaceVariant
 
     // ---- the installed version, and whether it is an official release ----
-    Text("Installed version", fontSize = 11.sp, color = soft)
+    // the version is the one inside the file when that was read, else the one the daemon logged at its last start
+    Text(if (u.versionFromLog) "Version (from the daemon's last start)" else "Installed version", fontSize = 11.sp, color = soft)
     if (!u.hasDaemon) {
         Text("nbt-aad was not found in ${u.aaDir}", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Red)
     } else {
@@ -458,6 +459,16 @@ private fun UnitBody(inst: InstallController, u: UnitStatus, onChange: () -> Uni
                     },
                 fontSize = 12.sp,
                 color = Red,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        }
+        // the file was read and is not the build that Android Auto last started with: it runs the old one until restarted
+        val started = u.runningVersion
+        if (u.fileVersion != null && started != null && started != u.fileVersion) {
+            Text(
+                "Android Auto last started as $started, but the file is ${u.fileVersion}. Restart Android Auto to run the file.",
+                fontSize = 12.sp,
+                color = Amber,
                 modifier = Modifier.padding(top = 4.dp),
             )
         }

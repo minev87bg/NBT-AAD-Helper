@@ -318,7 +318,7 @@ class InstallController(
         if (!u.hasDaemon) return null
         val f = u.daemonFile
         if (f == null && !u.daemonUnreadable) return null
-        return InstalledCheck.judge(u.installedVersion, f?.sha256, f?.size, releases)
+        return InstalledCheck.judge(u.fileVersion, f?.sha256, f?.size, releases)
     }
 
     // ---------------- install and go back ----------------

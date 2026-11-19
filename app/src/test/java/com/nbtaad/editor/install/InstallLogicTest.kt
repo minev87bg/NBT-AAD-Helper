@@ -460,4 +460,65 @@ class InstallLogicTest {
         assertEquals("2026-06-01", ReleaseLogic.day(r.published))
         assertEquals("1.0 MB".length, ReleaseLogic.mb(1024 * 1024).length)
     }
+
+    // ---- the version from the daemon's RAM log ----
+
+    @Test
+    fun theVersionIsTakenFromTheLastBuildLineOfTheDaemonsLog() {
+        val out = "F nbt-aad x \nBUILD-BEGIN\n  Build: v1.9.110 (Nov 17 2026 10:00:00)\n" +
+            "  Build: v1.9.112 (Nov 18 2026 12:00:00): USB stick found while running, earlier lines were not saved\nBUILD-END\n"
+        val s = RemoteScripts.parseStatus("/opt/aa", "/p", out)
+        assertEquals("v1.9.112", s.runningVersion)
+        assertEquals("v1.9.112", s.installedVersion)
+        assertNull(s.fileVersion)
+        assertTrue(s.versionFromLog)
+        assertTrue(s.hasDaemon)                       // the log lines did not disturb the file list
+        assertEquals(1, s.files.size)
+    }
+
+    @Test
+    fun noLogOrNothingUsableInItMeansNoVersion() {
+        assertNull(RemoteScripts.parseStatus("/opt/aa", "/p", "F nbt-aad x \n").runningVersion)
+        assertNull(RemoteScripts.parseStatus("/opt/aa", "/p", "BUILD-BEGIN\n\nBUILD-END\n").runningVersion)
+        // other lines that happen to say "Build" are not the daemon's build line
+        val other = "BUILD-BEGIN\nBuild failed\n  Rebuild: now (x)\nF evil x 5\nBUILD-END\nF nbt-aad x \n"
+        val s = RemoteScripts.parseStatus("/opt/aa", "/p", other)
+        assertNull(s.runningVersion)
+        assertEquals(setOf("nbt-aad"), s.files.keys)  // a line inside the log is not a file
+        // a log that was cut off (no end marker) is not trusted
+        assertNull(RemoteScripts.parseStatus("/opt/aa", "/p", "BUILD-BEGIN\n  Build: v1.9.1 (Nov 1 2026").runningVersion)
+        assertNull(RemoteScripts.parseStatus("/opt/aa", "/p", "BUILD-BEGIN\n  Build: v1.9.1 (Nov 1 2026 1:00:00)\n").runningVersion)
+    }
+
+    @Test
+    fun theLogAndTheEnvFileAreBothReadAndKeptApart() {
+        val out = "F nbt-aad x \nBUILD-BEGIN\n  Build: v2.0.0-test (Nov 18 2026 12:00:00)\nBUILD-END\n" +
+            "ENV-BEGIN\nNBT_A=1\nBuild: v9 (not this)\nENV-END\n"
+        val s = RemoteScripts.parseStatus("/opt/aa", "/p", out)
+        assertEquals("v2.0.0-test", s.runningVersion)
+        assertEquals("NBT_A=1\nBuild: v9 (not this)\n", s.envText)
+    }
+
+    @Test
+    fun theVersionInTheFileCountsMoreThanTheOneInTheLog() {
+        val base = RemoteScripts.parseStatus("/opt/aa", "/p", "F nbt-aad x \nBUILD-BEGIN\n  Build: v1.9.112 (Nov 18 2026 12:00:00)\nBUILD-END\n")
+        val read = base.withDaemonFile(DaemonFile(900_000, "ab".repeat(32), "v1.9.113"))
+        assertEquals("v1.9.113", read.installedVersion)
+        assertFalse(read.versionFromLog)
+        assertEquals("v1.9.112", read.runningVersion)   // kept, to tell that Android Auto runs another build than the file
+        // a file that names no version leaves the log's
+        val none = base.withDaemonFile(DaemonFile(900_000, "ab".repeat(32), null))
+        assertEquals("v1.9.112", none.installedVersion)
+        assertTrue(none.versionFromLog)
+    }
+
+    @Test
+    fun theStatusScriptAsksForTheDaemonsLogWithGrepAlone() {
+        for (withEnv in listOf(false, true)) {
+            val sh = RemoteScripts.status("/opt/aa", "/p", withEnv = withEnv)
+            assertTrue(sh.contains("grep \"Build: \" /dev/shmem/nbt-aad.log"))
+            assertTrue(sh.contains("BUILD-BEGIN"))
+            assertTrue(sh.contains("BUILD-END"))
+        }
+    }
 }

@@ -32,6 +32,8 @@ class UnitStatus(
     val daemonFile: DaemonFile? = null,
     /** Reading the installed nbt-aad back was tried and did not work. */
     val daemonUnreadable: Boolean = false,
+    /** The build the daemon named in its RAM log when it last started (null: no such log, or no such line in it). */
+    val runningVersion: String? = null,
 ) {
     val hasDaemon: Boolean get() = Names.DAEMON in files
     val hasPreviousDaemon: Boolean get() = "nbt-aad.old" in files
@@ -40,16 +42,28 @@ class UnitStatus(
     /** An nbt-aad that the head unit cannot run (for example after an install that stopped halfway). */
     val daemonBroken: Boolean get() = files[Names.DAEMON]?.let { !it.executable } ?: false
 
-    /** The version the installed daemon names itself: what the head unit's own tools found, else what was read from the file. */
-    val installedVersion: String? get() = version ?: daemonFile?.version
+    /** The version the installed file names inside itself: what the head unit's own tools found, else what was read from it. */
+    val fileVersion: String? get() = version ?: daemonFile?.version
+
+    /**
+     * The version to show: the one inside the file when that is known, else the build the daemon logged when it last
+     * started (instant to ask for, and what Android Auto is running, which is the installed file unless it was replaced since).
+     */
+    val installedVersion: String? get() = fileVersion ?: runningVersion
+
+    /** [installedVersion] is the one from the daemon's log, not from the file. */
+    val versionFromLog: Boolean get() = fileVersion == null && runningVersion != null
 
     /** The same status with the result of reading the installed daemon back ([file] null: it did not work). */
     fun withDaemonFile(file: DaemonFile?): UnitStatus =
-        UnitStatus(aaDir, pluginDir, files, pluginFiles, hasOldPlugin, version, envText, envMissing, file, file == null)
+        UnitStatus(
+            aaDir, pluginDir, files, pluginFiles, hasOldPlugin, version, envText, envMissing,
+            daemonFile = file, daemonUnreadable = file == null, runningVersion = runningVersion,
+        )
 
     /** One line for the log: where the folders are and what is in them. */
     fun describe(): String =
-        "folder $aaDir, plugin $pluginDir, version $installedVersion, files " +
+        "folder $aaDir, plugin $pluginDir, version $installedVersion${if (versionFromLog) " (from the daemon's log)" else ""}, files " +
             files.entries.joinToString { "${it.key}(${it.value.size}${if (it.value.executable) ",exec" else ""})" } +
             ", ${pluginFiles.size} plugin files, old plugin $hasOldPlugin" +
             (daemonFile?.let { ", daemon read back ${it.size} bytes sha256 ${it.sha256.take(16)}" }
@@ -118,6 +132,19 @@ object RemoteScripts {
         if mount -o remount rw /net/hu-omap/fs/sda0 >/dev/null 2>&1; then echo "REMOUNT ok"
         elif mount -o remount rw /fs/sda0 >/dev/null 2>&1; then echo "REMOUNT ok"
         else echo "REMOUNT failed"
+        fi
+    """.trimIndent()
+
+    /**
+     * The build lines of the daemon's RAM log (`grep` is there, unlike wc/head/od; the project's update guide asks for the
+     * same). The log is in RAM: it is there once Android Auto has been started since the head unit booted.
+     */
+    private val BUILD_PART = """
+        if [ -f /dev/shmem/nbt-aad.log ]; then
+          echo "BUILD-BEGIN"
+          grep "Build: " /dev/shmem/nbt-aad.log 2>/dev/null
+          echo ""
+          echo "BUILD-END"
         fi
     """.trimIndent()
 
@@ -310,7 +337,7 @@ object RemoteScripts {
      * [withEnv] the text of nbt-aad.env follows (see [parseStatus]).
      */
     fun status(aa: String, pl: String?, withEnv: Boolean = false): String =
-        sh(statusPart(pl != null) + (if (withEnv) "\n" + ENV_PART else "") + "\nexit 0", aa, pl ?: "")
+        sh(statusPart(pl != null) + "\n" + BUILD_PART + (if (withEnv) "\n" + ENV_PART else "") + "\nexit 0", aa, pl ?: "")
 
     fun parseStatus(aa: String?, pl: String?, out: String): UnitStatus {
         val files = LinkedHashMap<String, FileState>()
@@ -320,8 +347,20 @@ object RemoteScripts {
         var envBody: StringBuilder? = null   // the lines of nbt-aad.env while they are being read
         var envText: String? = null          // set once the end marker has been seen: a cut-off file is not trusted
         var envMissing = false
+        var inBuild = false                  // between the markers of the daemon's log lines
+        val builds = ArrayList<String>()
+        var runningVersion: String? = null   // the last build named in the log, once its end marker has been seen
         for (raw in out.lines()) {
             val line = raw.trim()
+            if (inBuild) {
+                if (line == "BUILD-END") {
+                    runningVersion = builds.lastOrNull()
+                    inBuild = false
+                } else {
+                    BUILD_LINE.matchEntire(line)?.let { builds += it.groupValues[1] }
+                }
+                continue
+            }
             if (envBody != null) {
                 // everything between the markers belongs to the file, whatever it looks like
                 if (line == "ENV-END") {
@@ -334,6 +373,7 @@ object RemoteScripts {
             }
             val t = line.split(Regex("\\s+"))
             when {
+                line == "BUILD-BEGIN" -> { inBuild = true; builds.clear() }
                 line == "ENV-BEGIN" -> envBody = StringBuilder()
                 line == "ENV-NONE" -> envMissing = true
                 line == "OLDPLUGIN" -> oldPlugin = true
@@ -342,8 +382,11 @@ object RemoteScripts {
                 line.startsWith("NBT-AAD-VERSION=") -> version = line.removePrefix("NBT-AAD-VERSION=")
             }
         }
-        return UnitStatus(aa, pl, files, plugin, oldPlugin, version, envText, envMissing)
+        return UnitStatus(aa, pl, files, plugin, oldPlugin, version, envText, envMissing, runningVersion = runningVersion)
     }
+
+    /** A line of the daemon's log that names its build: `Build: v1.9.112 (Nov 18 2026 12:34:56)`. */
+    private val BUILD_LINE = Regex("""Build:\s+(\S+)\s+\(.*""")
 
     fun parseProc(out: String): ProcScan {
         var scanned = false
