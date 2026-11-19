@@ -440,11 +440,13 @@ private fun UnitBody(inst: InstallController, u: UnitStatus, onChange: () -> Uni
     if (!u.hasDaemon) {
         Text("nbt-aad was not found in ${u.aaDir}", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Red)
     } else {
+        val version = u.installedVersion
         Text(
-            u.installedVersion ?: "unknown",
-            fontSize = 18.sp,
+            version ?: "not read yet",
+            fontSize = if (version != null) 18.sp else 14.sp,
             fontWeight = FontWeight.SemiBold,
-            fontFamily = FontFamily.Monospace,
+            fontFamily = if (version != null) FontFamily.Monospace else FontFamily.Default,
+            color = if (version != null) MaterialTheme.colorScheme.onSurface else soft,
         )
         if (u.daemonBroken) {
             Text(
@@ -461,9 +463,25 @@ private fun UnitBody(inst: InstallController, u: UnitStatus, onChange: () -> Uni
         }
         val verdict = inst.verdict()
         when {
-            inst.checkingDaemon -> ProgressLine("Checking the installed file…")
-            inst.releasesBusy && inst.releases == null -> ProgressLine("Comparing with Sq00ky's Releases page…")
-            verdict != null -> VerdictLines(InstalledCheck.describe(verdict, u.installedVersion))
+            inst.fileBusy -> ProgressLine(inst.fileMessage)
+            verdict != null -> VerdictLines(InstalledCheck.describe(verdict, version))
+            else -> {
+                // the file is read only on request: it takes a while, and the settings below do not need it
+                Text(
+                    if (version == null) {
+                        "Reads nbt-aad from the head unit (it can take a minute) to find its version and to compare it with the official releases."
+                    } else {
+                        "Reads nbt-aad from the head unit (it can take a minute) to compare it with the official releases."
+                    },
+                    fontSize = 12.sp,
+                    color = soft,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+                OutlinedButton(onClick = { inst.checkInstalled() }, enabled = !inst.working) {
+                    Text("CHECK IF OFFICIAL", fontSize = 12.sp)
+                }
+                if (inst.fileError) Text(inst.fileMessage, fontSize = 12.sp, color = Red)
+            }
         }
     }
     if (u.pluginDir == null) {

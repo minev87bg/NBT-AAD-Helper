@@ -110,17 +110,20 @@ object HeadUnit {
     }
 
     /**
-     * What is on the head unit now (read only): the folders and files, the text of nbt-aad.env, and the installed daemon
-     * read back and hashed. The last step takes a few seconds, so [early] is given what is known before it, to be shown
-     * while it goes on.
+     * What is on the head unit now (read only): the folders and files, the version where the head unit's own tools can
+     * find it, and the text of nbt-aad.env. This takes a moment; the installed file itself is read only on request
+     * ([readInstalledFile]), as that can take a minute.
      */
-    fun status(host: String, early: (UnitStatus) -> Unit = {}): UnitStatus =
-        SshSession(host).use { ssh ->
-            val lay = locate(ssh)
-            val first = readStatus(ssh, lay, withEnv = true)
-            early(first)
-            if (first.hasDaemon) first.withDaemonFile(readDaemon(ssh, lay)) else first
-        }
+    fun status(host: String): UnitStatus =
+        SshSession(host).use { ssh -> readStatus(ssh, locate(ssh), withEnv = true) }
+
+    /**
+     * The installed nbt-aad read back whole and hashed, for its version and to compare with the official releases (null:
+     * it could not be read). The head unit's disk is slow to read from here: about 30 seconds for the 1 MB file on the
+     * first car this was tried on.
+     */
+    fun readInstalledFile(host: String): DaemonFile? =
+        SshSession(host).use { ssh -> readDaemon(ssh, locate(ssh)) }
 
     /** The commands and folders the SSH login has, as text for the person to read or send on. */
     fun diagnose(host: String): String =
