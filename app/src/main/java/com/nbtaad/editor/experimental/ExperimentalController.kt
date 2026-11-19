@@ -1,0 +1,198 @@
+package com.nbtaad.editor.experimental
+
+import android.content.Context
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import com.nbtaad.editor.install.SourceFile
+import com.nbtaad.editor.log.AppLog
+import com.nbtaad.editor.net.friendlyError
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import java.time.LocalTime
+import java.time.format.DateTimeFormatter
+
+/**
+ * The state of the Experimental page: the project's issues and pull requests, which of them share files, the one that
+ * is open, its comments, its digest, and the download of a file that someone shared.
+ */
+class ExperimentalController(
+    private val ctx: Context,
+    private val scope: CoroutineScope,
+    /** Is this setting name in the list of settings (or already among the person's own)? */
+    private val isKnownSetting: (String) -> Boolean,
+    /** A shared file arrived: it goes on to the installer's page. */
+    private val onFile: (SourceFile, Topic, FileLink) -> Unit,
+) {
+    enum class Tab { ISSUES, PRS }
+
+    var topics by mutableStateOf<List<Topic>?>(null); private set
+    var loading by mutableStateOf(false); private set
+    var message by mutableStateOf(""); private set
+    var error by mutableStateOf(false); private set
+    var remaining by mutableStateOf<Int?>(null); private set
+
+    var tab by mutableStateOf(Tab.ISSUES)
+    var showClosed by mutableStateOf(false)
+
+    var scanBusy by mutableStateOf(false); private set
+    var scanNote by mutableStateOf(""); private set
+    var scanned by mutableStateOf<Map<Int, List<FileLink>>>(emptyMap()); private set
+
+    var selected by mutableStateOf<Topic?>(null); private set
+    var comments by mutableStateOf<List<Comment>?>(null); private set
+    var commentsBusy by mutableStateOf(false); private set
+    var commentsMessage by mutableStateOf(""); private set
+    var summary by mutableStateOf<Summary?>(null); private set
+
+    var downloadBusy by mutableStateOf(false); private set
+    var downloadMessage by mutableStateOf(""); private set
+    var downloadError by mutableStateOf(false); private set
+
+    /** What happened when a setting was offered for "Additional options". */
+    var settingNote by mutableStateOf("")
+
+    private val commentCache = HashMap<Int, List<Comment>>()
+
+    fun visible(): List<Topic> =
+        (topics ?: emptyList()).filter { (it.isPr == (tab == Tab.PRS)) && (it.open != showClosed) }
+
+    fun count(tab: Tab, closed: Boolean): Int =
+        (topics ?: emptyList()).count { (it.isPr == (tab == Tab.PRS)) && (it.open != closed) }
+
+    fun isKnown(key: String) = isKnownSetting(key)
+
+    fun open() {
+        if (topics == null && !loading) refresh()
+    }
+
+    private fun fail(prefix: String, e: Exception) {
+        AppLog.w("Experimental", "$prefix: ${e.javaClass.simpleName}: ${e.message}")
+        error = true
+        message = if (e is IssuesApi.RateLimited) e.message ?: "" else "$prefix: ${friendlyError(e)}"
+    }
+
+    fun refresh() {
+        if (loading) return
+        loading = true
+        error = false
+        message = "Loading from GitHub…"
+        scope.launch(Dispatchers.IO) {
+            try {
+                val r = IssuesApi.topics(ctx)
+                topics = r.value
+                remaining = r.remaining
+                commentCache.clear()
+                val at = LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm"))
+                message = "${r.value.size} pages loaded at $at" + (r.remaining?.let { ", $it requests left this hour" } ?: "")
+                AppLog.i("Experimental", message)
+            } catch (e: Exception) {
+                fail("Could not load the list", e)
+            } finally {
+                loading = false
+            }
+        }
+    }
+
+    /** Looks through the first posts and the newest comments of the project for links to files. */
+    fun scan() {
+        val list = topics ?: return
+        if (scanBusy) return
+        scanBusy = true
+        scanNote = "Looking for files in the comments…"
+        scope.launch(Dispatchers.IO) {
+            try {
+                val c = IssuesApi.recentComments(ctx)
+                remaining = c.remaining ?: remaining
+                val found = LinkedHashMap<Int, MutableList<FileLink>>()
+                for (t in list) {
+                    val f = Links.files(t.body, t.author, "the first post")
+                    if (f.isNotEmpty()) found.getOrPut(t.number) { ArrayList() } += f
+                }
+                for (cm in c.value) {
+                    val f = Links.files(cm.body, cm.author, "a comment on ${cm.created.take(10)}")
+                    if (f.isNotEmpty() && cm.topic > 0) found.getOrPut(cm.topic) { ArrayList() } += f
+                }
+                scanned = found.mapValues { (_, v) -> v.distinctBy { it.url } }
+                val older = if (c.value.size >= 300) " Older comments were not looked at." else ""
+                scanNote = "Looked at the first posts and the newest ${c.value.size} comments: " +
+                    (if (found.isEmpty()) "no page shares a file." else "${found.size} page${if (found.size == 1) "" else "s"} share files.") +
+                    older
+                AppLog.i("Experimental", scanNote)
+            } catch (e: Exception) {
+                AppLog.w("Experimental", "Scan failed: ${e.javaClass.simpleName}: ${e.message}")
+                scanNote = if (e is IssuesApi.RateLimited) e.message ?: "" else "Could not scan: ${friendlyError(e)}"
+            } finally {
+                scanBusy = false
+            }
+        }
+    }
+
+    fun select(t: Topic) {
+        selected = t
+        summary = null
+        downloadMessage = ""
+        downloadError = false
+        settingNote = ""
+        commentsMessage = ""
+        val cached = commentCache[t.number]
+        when {
+            cached != null -> comments = cached
+            t.comments == 0 -> comments = emptyList()
+            else -> {
+                comments = null
+                commentsBusy = true
+                scope.launch(Dispatchers.IO) {
+                    try {
+                        val r = IssuesApi.comments(ctx, t.number)
+                        remaining = r.remaining ?: remaining
+                        commentCache[t.number] = r.value
+                        if (selected?.number == t.number) comments = r.value
+                    } catch (e: Exception) {
+                        AppLog.w("Experimental", "Comments of #${t.number} failed: ${e.javaClass.simpleName}: ${e.message}")
+                        if (selected?.number == t.number) {
+                            commentsMessage = if (e is IssuesApi.RateLimited) e.message ?: "" else "Could not load the comments: ${friendlyError(e)}"
+                            comments = emptyList()
+                        }
+                    } finally {
+                        commentsBusy = false
+                    }
+                }
+            }
+        }
+    }
+
+    fun back() {
+        selected = null
+        comments = null
+        summary = null
+    }
+
+    /** Shows or hides the digest of the open page. */
+    fun toggleSummary() {
+        val t = selected ?: return
+        summary = if (summary != null) null else Digest.of(t, comments ?: emptyList())
+    }
+
+    fun download(link: FileLink) {
+        val t = selected ?: return
+        if (downloadBusy || !link.installable) return
+        downloadBusy = true
+        downloadError = false
+        downloadMessage = "Downloading ${link.name}…"
+        scope.launch(Dispatchers.IO) {
+            try {
+                val f = IssuesApi.download(ctx, link) { downloadMessage = "Downloading ${link.name}… ${it / 1024} KB" }
+                downloadMessage = ""
+                onFile(f, t, link)
+            } catch (e: Exception) {
+                AppLog.e("Experimental", "Download of ${link.name} failed", e)
+                downloadError = true
+                downloadMessage = "Could not get ${link.name}: ${friendlyError(e)}"
+            } finally {
+                downloadBusy = false
+            }
+        }
+    }
+}

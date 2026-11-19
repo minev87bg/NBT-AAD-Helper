@@ -3,7 +3,7 @@
 Android app that edits `/opt/aa/nbt-aad.env` on a BMW / Toyota Supra NBT Evo head unit running
 [NBT-AAD](https://github.com/Sq00ky/Supra-iDrive6-Android-Auto) (native Android Auto).
 
-Status: tested in a car for detection, reset, read, save, install and going back. Versions 1.0.16 to 1.0.18 (every reset scans for the car first, SSH actions look for the car again, new page 2, Skip, app log) have not been tried in a car yet. EXPERIMENTAL and CONTRIBUTE are announced but not built.
+Status: tested in a car for detection, reset, read, save, install and going back. Versions 1.0.16 to 1.0.18 (every reset scans for the car first, SSH actions look for the car again, new page 2, Skip, app log) have not been tried in a car yet. Experimental is built (v1.0.20), CONTRIBUTE is announced but not built.
 
 ## Get the APK
 Every successful build is published as a release (Releases page, newest on top, `NBT-AAD-Helper-v1.0.N.apk`).
@@ -51,6 +51,18 @@ connection was made is not repeated.
 The first screen also has a small "Check for updates" button, under the update message at the top, so the result shows
 where the eyes already are. The app and the settings list are checked at every start as well, but people often only
 minimise an app, so the button does it on request.
+
+### Experimental
+Issues and pull requests of Sq00ky's project, open and closed, read from GitHub without signing in (60 requests an hour;
+the page says how many are left). Chips switch between issues and pull requests, open and closed. **SCAN FOR FILES**
+looks through the first posts and the newest 300 comments (three requests) for links to files and marks the pages that
+share some with a FILES pill. A page shows its text and comments; **OPEN ON GITHUB** opens it in the browser;
+**SUMMARIZE** gives a short digest made on the phone from the words of the page (who wrote it, the first lines, the
+latest comment, the settings and files it names, its links); it is not an AI summary. A shared zip or build file has
+**GET FOR INSTALL**: the app downloads it, looks into it like any file from the phone and takes it to the installer
+page, with the warning that it is not from the Releases page and the box to confirm that you trust it. Files that GitHub
+shows only to signed-in people (Actions artifacts) are opened in the browser. Setting names such as `NBT_SOMETHING` that
+a page mentions can be added with ADD to "Additional options" of the settings page.
 
 ### The app log
 The app writes down what it does on the phone (detection steps, every SSH command with its answer, what the screens

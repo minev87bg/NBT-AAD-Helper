@@ -18,6 +18,7 @@ import com.nbtaad.editor.env.EnvCheck
 import com.nbtaad.editor.env.EnvDoc
 import com.nbtaad.editor.env.Opt
 import com.nbtaad.editor.install.InstallController
+import com.nbtaad.editor.experimental.ExperimentalController
 import com.nbtaad.editor.log.AppLog
 import com.nbtaad.editor.log.exportName
 import com.nbtaad.editor.log.saveTo
@@ -41,7 +42,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
-enum class Screen { DETECT, HUB, OPTIONS, INSTALL }
+enum class Screen { DETECT, HUB, OPTIONS, INSTALL, EXPERIMENTAL }
 enum class UpdatePhase { IDLE, CHECKING, CURRENT, AVAILABLE, DOWNLOADING, FAILED }
 enum class SaveStatus { RUNNING, OK, FAIL }
 enum class LineKind { INFO, OK, ERROR }
@@ -93,6 +94,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /** The "Install / update NBT Android Auto" screen: releases, files, what is on the head unit, install and go back. */
     val inst = InstallController(ctx, viewModelScope, host = { detect.hu }, rescan = { rescanForHost() })
+
+    /** The Experimental page: issues and pull requests of the project, and the files people share in them. */
+    val exp = ExperimentalController(
+        ctx, viewModelScope,
+        isKnownSetting = { k -> catalog.any { it.key == k } || k in customKeys },
+        onFile = { file, topic, link ->
+            val kind = if (topic.isPr) "pull request" else "issue"
+            AppLog.i("Experimental", "Taking ${link.name} from $kind #${topic.number} to the installer")
+            inst.open()
+            inst.useDownloaded(file, "$kind #${topic.number}, shared by ${link.by.ifBlank { "someone" }}", topic.url)
+            screen = Screen.INSTALL
+        },
+    )
     var themeMode by mutableStateOf(themePrefs.read())
 
     fun cycleTheme() {
@@ -546,6 +560,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun chooseInstall() {
         inst.open()
         screen = Screen.INSTALL
+    }
+
+    /** "Experimental": issues and pull requests of the project. */
+    fun chooseExperimental() {
+        exp.open()
+        screen = Screen.EXPERIMENTAL
+    }
+
+    /** A setting named in an issue is offered for "Additional options" of the settings page. */
+    fun addSettingFromPage(key: String) {
+        val problem = addCustom(key, "")
+        exp.settingNote = problem ?: "$key is now in Additional options (Change a setting)."
+        AppLog.i("Experimental", "Setting $key offered for Additional options: ${problem ?: "added"}")
     }
 
     fun backToHub() {

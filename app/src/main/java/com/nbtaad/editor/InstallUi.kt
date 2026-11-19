@@ -49,6 +49,7 @@ import com.nbtaad.editor.install.RunLine
 import com.nbtaad.editor.install.RunKind
 import com.nbtaad.editor.install.RunState
 import com.nbtaad.editor.install.RunStatus
+import com.nbtaad.editor.install.SourceKind
 import com.nbtaad.editor.install.UnitStatus
 
 // =========================================================================
@@ -93,9 +94,12 @@ fun HubScreen(vm: MainViewModel) {
                 icon = HubIcon.FLASK,
                 tint = Color(0xFFE9A33A),
                 title = "Experimental",
-                info = "Browse the open issues and pull requests of the project, scan them for files and try new builds. " +
-                    "Coming in the next version.",
+                subtitle = "Issues and builds",
+                info = "Look through the open and closed issues and pull requests of Sq00ky's project: what people " +
+                    "report, test and suggest. SCAN FOR FILES marks the pages that share files (test builds), which " +
+                    "can be installed from there. SUMMARIZE gives the gist of a page and its links.",
                 modifier = Modifier.weight(1f),
+                onClick = { vm.chooseExperimental() },
             )
             SoonTile(
                 icon = HubIcon.HEART,
@@ -168,24 +172,38 @@ private fun WideTile(icon: HubIcon, tint: Color, title: String, subtitle: String
 
 /** A half-width tile that is not ready yet: dimmed, with "soon" where the subtitle would be. The (i) still works. */
 @Composable
-private fun SoonTile(icon: HubIcon, tint: Color, title: String, info: String, modifier: Modifier = Modifier) {
+private fun SoonTile(
+    icon: HubIcon,
+    tint: Color,
+    title: String,
+    info: String,
+    modifier: Modifier = Modifier,
+    subtitle: String? = null,
+    onClick: (() -> Unit)? = null,
+) {
     var showInfo by remember { mutableStateOf(false) }
+    val ready = onClick != null
     Box(
         modifier.height(150.dp).clip(TileShape)
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)),
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = if (ready) 0.9f else 0.45f))
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
     ) {
         Column(
-            Modifier.fillMaxSize().padding(16.dp).alpha(0.62f),
+            Modifier.fillMaxSize().padding(16.dp).alpha(if (ready) 1f else 0.62f),
             verticalArrangement = Arrangement.SpaceBetween,
         ) {
             IconSquare(icon, tint, 48.dp)
             Column {
                 Text(title, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(6.dp))
-                Box(
-                    Modifier.clip(CircleShape).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f))
-                        .padding(horizontal = 8.dp, vertical = 3.dp),
-                ) { Text("SOON", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp) }
+                if (ready && subtitle != null) {
+                    Text(subtitle, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } else {
+                    Box(
+                        Modifier.clip(CircleShape).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f))
+                            .padding(horizontal = 8.dp, vertical = 3.dp),
+                    ) { Text("SOON", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp) }
+                }
             }
         }
         Box(Modifier.align(Alignment.TopEnd).padding(14.dp)) {
@@ -507,7 +525,15 @@ private fun PackageCard(inst: InstallController, v: PackageView) {
                     color = if (v.prerelease) Amber else Green,
                 )
             } else {
-                Text("From a file on this phone: nobody has checked it.", fontSize = 12.sp, color = Amber)
+                Text(
+                    if (v.source == SourceKind.ISSUE) {
+                        "From GitHub, shared by ${v.origin ?: "someone"}: nobody has checked it."
+                    } else {
+                        "From a file on this phone: nobody has checked it."
+                    },
+                    fontSize = 12.sp,
+                    color = Amber,
+                )
             }
             Spacer(Modifier.height(6.dp))
             Text(verdict, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = verdictColor)
@@ -611,7 +637,9 @@ private fun PlanDialog(inst: InstallController, v: PackageView) {
         text = {
             Column(Modifier.heightIn(max = 440.dp).verticalScroll(rememberScrollState())) {
                 Text(
-                    (if (v.fromProject) "From Sq00ky's Releases page: " else "From your phone: ") + v.title +
+                    (if (v.fromProject) "From Sq00ky's Releases page: "
+                    else if (v.source == SourceKind.ISSUE) "From GitHub (${v.origin ?: "an issue"}): "
+                    else "From your phone: ") + v.title +
                         (pkg.version?.let { " ($it)" } ?: ""),
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
@@ -634,8 +662,9 @@ private fun PlanDialog(inst: InstallController, v: PackageView) {
                 }
                 if (!v.fromProject) {
                     Text(
-                        "This file is not from Sq00ky's Releases page. The app can check that it is a program for the " +
-                            "head unit, but not that it is safe.",
+                        "This file is not from Sq00ky's Releases page" +
+                            (if (v.source == SourceKind.ISSUE) ": someone else shared it in a discussion" else "") +
+                            ". The app can check that it is a program for the head unit, but not that it is safe.",
                         fontSize = 12.sp,
                         color = Red,
                         modifier = Modifier.padding(top = 8.dp),

@@ -14,7 +14,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
-enum class SourceKind { RELEASE, PHONE }
+enum class SourceKind { RELEASE, PHONE, ISSUE }
 
 /** A set of files the person can install, with where it came from. */
 class PackageView(
@@ -23,6 +23,8 @@ class PackageView(
     val title: String,
     val prerelease: Boolean = false,
     val pageUrl: String? = null,
+    /** For a file shared in an issue or pull request: which page and who shared it ("#12, shared by bob"). */
+    val origin: String? = null,
 ) {
     /** Files that Sq00ky published on the project's Releases page. Anything else is the person's own responsibility. */
     val fromProject: Boolean get() = source == SourceKind.RELEASE
@@ -172,6 +174,29 @@ class InstallController(
                 finishPrep(PackageView(pkg, SourceKind.PHONE, title), title)
             } catch (e: Exception) {
                 AppLog.e("Releases", "Reading the picked file failed", e)
+                prepError = true
+                prepMessage = "Could not read the file: ${friendlyError(e)}"
+            } finally {
+                prepBusy = false
+            }
+        }
+    }
+
+    // ---------------- a file that someone shared in an issue or pull request ----------------
+
+    fun useDownloaded(file: SourceFile, origin: String, pageUrl: String?) {
+        if (working) return
+        prepBusy = true
+        prepError = false
+        prepFraction = null
+        prepMessage = "Checking the files…"
+        view = null
+        scope.launch(Dispatchers.IO) {
+            try {
+                val pkg = BuildPackage.of(listOf(file))
+                finishPrep(PackageView(pkg, SourceKind.ISSUE, file.name, pageUrl = pageUrl, origin = origin), file.name)
+            } catch (e: Exception) {
+                AppLog.e("Releases", "Looking into ${file.name} failed", e)
                 prepError = true
                 prepMessage = "Could not read the file: ${friendlyError(e)}"
             } finally {
