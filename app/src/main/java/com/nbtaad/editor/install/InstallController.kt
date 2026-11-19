@@ -54,6 +54,8 @@ class InstallController(
     private val scope: CoroutineScope,
     private val host: () -> String?,
     private val rescan: () -> String?,
+    /** Why the last look for the car found no head unit, for the failure message. */
+    private val problem: () -> String? = { null },
 ) {
     // the project's releases
     var releases by mutableStateOf<List<ReleaseInfo>?>(null)
@@ -227,21 +229,22 @@ class InstallController(
 
     // ---------------- the head unit ----------------
 
+    /** What is said while the car is looked for: the first look when no car is known, else a new look. */
+    private fun lookingNote(): String =
+        if (host() == null) "No car known yet. Looking for the car…" else "No connection. Looking for the car again…"
+
     fun readUnit() {
         if (unitBusy) return
-        if (host() == null) {
-            unit = null
-            unitError = true
-            unitMessage = Reach.NO_UNIT
-            return
-        }
         unitBusy = true
         unitError = false
-        unitMessage = "Looking at the head unit…"
+        unitMessage = if (host() == null) "Looking for the car…" else "Looking at the head unit…"
         scope.launch(Dispatchers.IO) {
             try {
                 NetworkBinder.bindToLocalNetwork(ctx)
-                unit = runOnHeadUnit(host, rescan) { HeadUnit.status(it) }
+                unit = runOnHeadUnit(host, rescan, onRescan = { unitMessage = lookingNote() }, whyNot = problem) {
+                    unitMessage = "Looking at the head unit…"
+                    HeadUnit.status(it)
+                }
                 unitMessage = ""
                 unit?.let { AppLog.i("Unit", "Status: ${it.describe()}") }
             } catch (e: Exception) {
@@ -306,16 +309,15 @@ class InstallController(
 
     fun diagnose() {
         if (diagBusy) return
-        if (host() == null) {
-            diagText = Reach.NO_UNIT
-            return
-        }
         diagBusy = true
-        diagText = "Asking the head unit…"
+        diagText = if (host() == null) "Looking for the car…" else "Asking the head unit…"
         scope.launch(Dispatchers.IO) {
             try {
                 NetworkBinder.bindToLocalNetwork(ctx)
-                diagText = runOnHeadUnit(host, rescan) { HeadUnit.diagnose(it) }
+                diagText = runOnHeadUnit(host, rescan, onRescan = { diagText = lookingNote() }, whyNot = problem) {
+                    diagText = "Asking the head unit…"
+                    HeadUnit.diagnose(it)
+                }
                 AppLog.i("Unit", "TOOLS CHECK:\n" + diagText)
             } catch (e: Exception) {
                 AppLog.e("Unit", "TOOLS CHECK failed", e)
@@ -348,11 +350,6 @@ class InstallController(
         val v = view ?: return
         if (working) return
         askInstall = false
-        if (host() == null) {
-            unitError = true
-            unitMessage = Reach.NO_UNIT
-            return
-        }
         recStarted = false
         job = RunState(RunKind.INSTALL, emptyList(), RunStatus.RUNNING)
         AppLog.i(
@@ -366,7 +363,8 @@ class InstallController(
                 val rep = reporter(recording = true)
                 val out = runOnHeadUnit(
                     host, rescan,
-                    onRescan = { addLine("No connection. Looking for the car again…", Level.WARN) },
+                    onRescan = { addLine(lookingNote(), Level.WARN) },
+                    whyNot = problem,
                 ) { HeadUnit.install(it, v.pkg, rep) }
                 val what = listOfNotNull(
                     if (out.daemon) "nbt-aad" else null,
@@ -388,11 +386,6 @@ class InstallController(
         val wantDaemon = revertDaemon
         val wantPlugin = revertPlugin
         askRevert = false
-        if (host() == null) {
-            unitError = true
-            unitMessage = Reach.NO_UNIT
-            return
-        }
         AppLog.i("Revert", "Go back started: daemon $wantDaemon, plugin $wantPlugin")
         job = RunState(RunKind.REVERT, emptyList(), RunStatus.RUNNING)
         scope.launch(Dispatchers.IO) {
@@ -401,7 +394,8 @@ class InstallController(
                 val rep = reporter(recording = false)
                 val out = runOnHeadUnit(
                     host, rescan,
-                    onRescan = { addLine("No connection. Looking for the car again…", Level.WARN) },
+                    onRescan = { addLine(lookingNote(), Level.WARN) },
+                    whyNot = problem,
                 ) { HeadUnit.revert(it, rep, wantDaemon, wantPlugin) }
                 val what = listOfNotNull(
                     if (out.daemon) "nbt-aad" else null,

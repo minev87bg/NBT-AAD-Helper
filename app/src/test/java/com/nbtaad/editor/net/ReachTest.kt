@@ -83,13 +83,57 @@ class ReachTest {
     }
 
     @Test
-    fun withoutAnAddressTheFirstScreenIsPointedTo() {
+    fun withoutAnAddressTheCarIsLookedForFirst() {
+        var scans = 0
+        var told = 0
+        val got = runOnHeadUnit({ null }, { scans++; "10.0.0.2" }, { told++ }) { host -> "done on $host" }
+        assertEquals("done on 10.0.0.2", got)
+        assertEquals(1, scans)
+        assertEquals(1, told)
+    }
+
+    @Test
+    fun whenNoCarIsFoundTheFailureSaysWhy() {
         try {
-            runOnHeadUnit<String>({ null }, { "10.0.0.2" }) { "never" }
+            runOnHeadUnit<String>({ null }, { null }, whyNot = { "Car found, but SSH is closed." }) { "never" }
             fail("should have failed")
         } catch (e: IOException) {
-            assertTrue(e.message!!.contains("DETECT CAR"))
+            assertEquals("Car found, but SSH is closed.", e.message)
         }
+        // no reason known: the general text, which says what to check
+        try {
+            runOnHeadUnit<String>({ null }, { null }) { "never" }
+            fail("should have failed")
+        } catch (e: IOException) {
+            assertEquals(Reach.NO_UNIT, e.message)
+            assertTrue(e.message!!.contains("WiFi"))
+        }
+    }
+
+    @Test
+    fun aLookThatJustFoundTheAddressIsNotRepeatedWhenTheConnectFails() {
+        var scans = 0
+        var runs = 0
+        try {
+            runOnHeadUnit<String>({ null }, { scans++; "10.0.0.2" }) { runs++; throw SshUnreachable("timed out") }
+            fail("should have failed")
+        } catch (e: SshUnreachable) {
+            assertEquals("timed out", e.message)
+        }
+        assertEquals(1, scans)
+        assertEquals(1, runs)
+    }
+
+    @Test
+    fun aDeadWifiBindingIsToldFromNoInternet() {
+        // what the app got while it was still tied to the car's WiFi that was gone, with full-speed mobile data
+        val e = java.net.SocketException("socket failed: ENONET (Machine is not on the network)")
+        assertTrue(Online.deadNetwork(e))
+        assertTrue(Online.offline(e))
+        assertTrue(Online.deadNetwork(IOException("wrapped", e)))
+        assertFalse(Online.deadNetwork(java.net.UnknownHostException("api.github.com")))
+        assertFalse(Online.deadNetwork(java.net.SocketTimeoutException("timed out")))
+        assertFalse(Online.deadNetwork(IOException()))
     }
 
     @Test

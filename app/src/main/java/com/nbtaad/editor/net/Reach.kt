@@ -34,6 +34,22 @@ object Online {
         return false
     }
 
+    /**
+     * Whether the request failed because the app is still tied to a network that is gone ("socket failed: ENONET
+     * (Machine is not on the network)"). The internet may be fine: the tie to the car's WiFi is what is dead.
+     */
+    fun deadNetwork(e: Throwable): Boolean {
+        var t: Throwable? = e
+        var depth = 0
+        while (t != null && depth < 6) {
+            val m = t.message ?: ""
+            if (m.contains("ENONET") || m.contains("Machine is not on the network", ignoreCase = true)) return true
+            t = t.cause
+            depth++
+        }
+        return false
+    }
+
     fun describe(e: Throwable): String = when {
         offline(e) -> NO_INTERNET
         else -> e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName
@@ -41,8 +57,9 @@ object Online {
 }
 
 object Reach {
-    /** Shown where an action needs the head unit and the first screen found none (or was skipped). */
-    const val NO_UNIT = "No head unit is connected. Go back to the first screen and press DETECT CAR."
+    /** Shown when an action needs the head unit, none was known and the app looked for the car and found none. */
+    const val NO_UNIT = "No car found. Make sure the phone is on the car's WiFi (phone, dongle and car in the same " +
+        "network) and try again. DETECT CAR on the first screen shows more."
 
     /** Whether a failed connect means "no connection" (as opposed to a refused login or no common algorithm). */
     fun looksUnreachable(e: Throwable): Boolean {
@@ -63,20 +80,30 @@ object Reach {
 }
 
 /**
- * Runs [block] with the head unit's address. When no SSH connection can be made, the car is looked for again
- * ([rescan] does what DETECT CAR does and returns the address it found, or null) and [block] runs once more with that
- * address. Only a failed connect starts a second run, never a failure halfway through the work.
+ * Runs [block] with the head unit's address. Where there is no address yet (the first screen was skipped, or the car
+ * changed) the car is looked for first, and when no SSH connection can be made, it is looked for again: [rescan] does
+ * what DETECT CAR does and returns the address it found, or null. [onRescan] is called before each look. When the
+ * car is looked for and not found, the failure says why ([whyNot], else a general text). [block] runs a second time
+ * only after a failed connect, never after a failure halfway through the work, and never right after a look that
+ * just found the address.
  */
 fun <T> runOnHeadUnit(
     host: () -> String?,
     rescan: () -> String?,
     onRescan: () -> Unit = {},
+    whyNot: () -> String? = { null },
     block: (String) -> T,
 ): T {
-    val first = host() ?: throw IOException(Reach.NO_UNIT)
+    var looked = false
+    val first = host() ?: run {
+        onRescan()
+        looked = true
+        rescan()
+    } ?: throw IOException(whyNot() ?: Reach.NO_UNIT)
     try {
         return block(first)
     } catch (e: SshUnreachable) {
+        if (looked) throw e
         onRescan()
         val fresh = rescan() ?: throw e
         return block(fresh)

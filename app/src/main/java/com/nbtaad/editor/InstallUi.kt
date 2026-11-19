@@ -370,7 +370,7 @@ fun InstallScreen(vm: MainViewModel) {
                 Spacer(Modifier.height(8.dp))
                 OutlinedButton(
                     onClick = { inst.openRevert() },
-                    enabled = !inst.working && inst.hasHost && inst.unit?.hasPrevious != false,
+                    enabled = !inst.working && inst.unit?.hasPrevious != false,
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("Go back to the previous version") }
                 if (inst.unit?.hasPrevious == false) {
@@ -405,7 +405,7 @@ private fun UnitCard(inst: InstallController) {
             val u = inst.unit
             when {
                 inst.unitBusy -> {
-                    Text("Looking at the head unit…", fontSize = 12.sp)
+                    Text(inst.unitMessage.ifEmpty { "Looking at the head unit…" }, fontSize = 12.sp)
                     LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 6.dp))
                 }
                 inst.unitError -> Text(inst.unitMessage, fontSize = 12.sp, color = Red)
@@ -574,14 +574,14 @@ private fun PackageCard(inst: InstallController, v: PackageView) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Button(
                     onClick = { inst.askInstall = true },
-                    enabled = pkg.installable && !inst.working && inst.hasHost,
+                    enabled = pkg.installable && !inst.working,
                 ) { Text("INSTALL ON THE HEAD UNIT") }
                 Spacer(Modifier.width(8.dp))
                 TextButton(onClick = { inst.clearChoice() }, enabled = !inst.working) { Text("Clear") }
             }
             if (!inst.hasHost) {
                 Text(
-                    "Needs a connected head unit: press DETECT CAR on the first screen.",
+                    "No car is connected yet: the app looks for it first when you press INSTALL.",
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

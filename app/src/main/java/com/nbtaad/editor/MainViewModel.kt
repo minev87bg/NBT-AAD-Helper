@@ -94,7 +94,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
 
     /** The "Install / update NBT Android Auto" screen: releases, files, what is on the head unit, install and go back. */
-    val inst = InstallController(ctx, viewModelScope, host = { detect.hu }, rescan = { rescanForHost() })
+    val inst = InstallController(
+        ctx, viewModelScope, host = { detect.hu }, rescan = { rescanForHost() }, problem = { scanProblem },
+    )
 
     /** The Experimental page: issues and pull requests of the project, and the files people share in them. */
     val exp = ExperimentalController(
@@ -499,14 +501,27 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Looks for the car again (what DETECT CAR does); returns the head unit's address when SSH answers there. */
+    /** Why the last look for the car, started by an action that needed it, found no head unit (null: it found one). */
+    @Volatile
+    private var scanProblem: String? = null
+
+    /**
+     * Looks for the car (what DETECT CAR does) for an action that needs the head unit and has no address, or whose
+     * address does not answer; returns the head unit's address when SSH answers there.
+     */
     private fun rescanForHost(): String? {
         NetworkBinder.bindToLocalNetwork(ctx)
-        AppLog.i("Detect", "Looking for the car again (no SSH connection)")
+        AppLog.i("Detect", if (detect.hu == null) "Looking for the car (no car is known yet)" else "Looking for the car again (no SSH connection)")
         val r = CarDetector.detect { AppLog.i("Detect", it) }
         applyResult(r)
-        return if (r.sshOpen) r.huIp else null
+        val host = if (r.sshOpen) r.huIp else null
+        scanProblem = if (host != null) null else feedback
+        return host
     }
+
+    /** What a screen says while an action looks for the car: the first look when no car is known, else a new look. */
+    private fun lookingNote(): String =
+        if (detect.hu == null) "No car known yet. Looking for the car…" else "No connection. Looking for the car again…"
 
     // =====================================================================
     // Navigation between the screens
@@ -769,11 +784,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun readOptions() {
         if (optBusy) return
-        if (detect.hu == null) {
-            optError = true
-            optFeedback = Reach.NO_UNIT
-            return
-        }
         optBusy = true
         optError = false
         optFeedback = "Connecting…"
@@ -782,7 +792,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 NetworkBinder.bindToLocalNetwork(ctx)
                 val found = runOnHeadUnit(
                     { detect.hu }, { rescanForHost() },
-                    onRescan = { optFeedback = "No connection. Looking for the car again…" },
+                    onRescan = { optFeedback = lookingNote() },
+                    whyNot = { scanProblem },
                 ) { hu -> EnvRemote.read(hu) { optFeedback = it } }
                 when (val res = found) {
                     is EnvRemote.ReadResult.Found -> {
@@ -841,10 +852,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun save() {
-        if (detect.hu == null) {
-            saveDialog = SaveDialogState(listOf(DialogLine(Reach.NO_UNIT, LineKind.ERROR)), SaveStatus.FAIL)
-            return
-        }
         val text = renderCurrent() ?: return
         storage.saveDraft(carId, text)
         saveDialog = SaveDialogState(listOf(DialogLine("Preparing ${text.length} bytes…")), SaveStatus.RUNNING)
@@ -853,7 +860,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 NetworkBinder.bindToLocalNetwork(ctx)
                 runOnHeadUnit(
                     { detect.hu }, { rescanForHost() },
-                    onRescan = { addLine(DialogLine("No connection. Looking for the car again…")) },
+                    onRescan = { addLine(DialogLine(lookingNote())) },
+                    whyNot = { scanProblem },
                 ) { hu -> EnvRemote.write(hu, text.toByteArray(Charsets.UTF_8)) { addLine(DialogLine(it)) } }
                 storage.saveUploaded(carId, text)
                 storage.clearDraft(carId)

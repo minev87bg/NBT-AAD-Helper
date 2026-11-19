@@ -59,6 +59,9 @@ object NetworkBinder {
      * A WiFi dongle without internet makes Android route app traffic over mobile data.
      * Binding the process to the WiFi/Ethernet network avoids that. When the phone itself is the
      * hotspot there is no such network and nothing is bound (hotspot traffic is local anyway).
+     *
+     * The binding is looked at again (this is called) before every action with the car and before every internet
+     * request: a network that is gone leaves a dead binding behind, and then no new connection can be made at all.
      */
     fun bindToLocalNetwork(ctx: Context) {
         try {
@@ -71,6 +74,15 @@ object NetworkBinder {
                         c.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET))
             }
             cm.bindProcessToNetwork(pick)
+        } catch (_: Exception) {
+        }
+    }
+
+    /** Lets go of any tie to a network: new connections are routed by the system again. */
+    fun unbind(ctx: Context) {
+        try {
+            val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            cm.bindProcessToNetwork(null)
         } catch (_: Exception) {
         }
     }
