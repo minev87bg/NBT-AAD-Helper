@@ -21,6 +21,9 @@ object SshConfig {
     const val PORT = 22
 }
 
+/** The person stopped a long read. */
+class SshCancelled : IOException("Stopped")
+
 class SshSession(host: String) : AutoCloseable {
     private val session: Session
 
@@ -83,7 +86,16 @@ class SshSession(host: String) : AutoCloseable {
      * Runs one command (the head unit has no sftp/scp, so everything goes through exec channels). [onSent] is told
      * how many bytes of [stdin] have been handed to the connection so far.
      */
-    fun exec(cmd: String, stdin: ByteArray? = null, timeoutMs: Long = 20000, onSent: ((Long) -> Unit)? = null): Result {
+    fun exec(
+        cmd: String,
+        stdin: ByteArray? = null,
+        timeoutMs: Long = 20000,
+        /** Told how many bytes of output have come so far (a long read, such as a log, shows how far it is). */
+        onOut: ((Long) -> Unit)? = null,
+        /** Asked often; true stops the command and throws [SshCancelled]. */
+        cancelled: (() -> Boolean)? = null,
+        onSent: ((Long) -> Unit)? = null,
+    ): Result {
         val ch = session.openChannel("exec") as ChannelExec
         ch.setCommand(cmd)
         val errBuf = ByteArrayOutputStream()
@@ -105,11 +117,13 @@ class SshSession(host: String) : AutoCloseable {
         val end = System.currentTimeMillis() + timeoutMs
         try {
             while (true) {
+                if (cancelled?.invoke() == true) throw SshCancelled()
                 while (input.available() > 0) {
                     val n = input.read(buf)
                     if (n < 0) break
                     out.write(buf, 0, n)
                 }
+                onOut?.invoke(out.size().toLong())
                 if (ch.isClosed) {
                     while (input.available() > 0) {
                         val n = input.read(buf)

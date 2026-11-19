@@ -338,6 +338,8 @@ private fun TopicDetail(vm: MainViewModel, t: Topic) {
                         Text(if (exp.aiKeySet) "AI key" else "Set AI key", fontSize = 12.sp)
                     }
                 }
+                // logs for this page: the Contribute page packs them and comes back to open this page
+                TextButton(onClick = { vm.chooseContribute(t) }) { Text("SEND LOGS HERE", fontSize = 12.sp) }
                 if (exp.aiBusy) {
                     Text("Claude is reading the page…", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     LinearProgressIndicator(Modifier.fillMaxWidth().padding(vertical = 4.dp))

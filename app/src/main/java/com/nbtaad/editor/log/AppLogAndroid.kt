@@ -18,6 +18,12 @@ private var appVersion = "?"
 
 private fun device() = "Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT}), ${Build.MANUFACTURER} ${Build.MODEL}"
 
+/** "1.0.30 (code 30)": which build of the app this is, for what is sent to the project. */
+fun AppLog.versionText(): String = appVersion
+
+/** "Android 16 (API 36), motorola motorola edge 70" */
+fun AppLog.deviceText(): String = device()
+
 /** Starts the log (once): the file, the copy into Android's own log, and the entry for a crash. Safe to call again. */
 fun AppLog.start(ctx: Context) {
     if (!setup(File(ctx.applicationContext.filesDir, "logs"))) return

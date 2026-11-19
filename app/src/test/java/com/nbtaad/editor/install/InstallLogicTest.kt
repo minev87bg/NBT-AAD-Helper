@@ -516,9 +516,19 @@ class InstallLogicTest {
     fun theStatusScriptAsksForTheDaemonsLogWithGrepAlone() {
         for (withEnv in listOf(false, true)) {
             val sh = RemoteScripts.status("/opt/aa", "/p", withEnv = withEnv)
-            assertTrue(sh.contains("grep \"Build: \" /dev/shmem/nbt-aad.log"))
+            assertTrue(sh.contains("grep \"Build: \" \$d/nbt-aad.log"))
+            // Android Auto runs on the hu-omap processor: its RAM is /net/hu-omap/dev/shmem from this login
+            assertTrue(sh.contains("for d in /dev/shmem /net/hu-omap/dev/shmem; do"))
             assertTrue(sh.contains("BUILD-BEGIN"))
             assertTrue(sh.contains("BUILD-END"))
         }
+    }
+
+    @Test
+    fun theLogFinderScriptLooksInRamAndOnTheStickOnBothProcessors() {
+        val sh = RemoteScripts.findLogs()
+        assertTrue(sh.contains("for d in /dev/shmem /net/hu-omap/dev/shmem /mnt/umass* /net/hu-omap/mnt/umass*; do"))
+        assertTrue(sh.contains("ls -l \$d/nbt-aad*.log 2>/dev/null"))
+        assertFalse(sh.contains("¤"))
     }
 }

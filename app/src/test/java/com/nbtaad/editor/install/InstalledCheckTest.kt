@@ -120,7 +120,7 @@ class InstalledCheckTest {
         assertEquals(Origin.UNLISTED, v.origin)
         assertNull(v.release)
         val d = InstalledCheck.describe(v, "v1.9.113-test", zone, now)
-        assertEquals("Not an official release", d.headline)
+        assertEquals("Not official, or too old", d.headline)
         assertEquals(Tone.WARN, d.tone)
         // no version inside, only bytes nobody published
         assertEquals(Origin.UNLISTED, InstalledCheck.judge(null, sum('9'), 900_000, releases).origin)

@@ -108,9 +108,12 @@ fun HubScreen(vm: MainViewModel) {
                 icon = HubIcon.HEART,
                 tint = Color(0xFFE56B94),
                 title = "Contribute",
-                info = "Pick log files from the head unit, pack them into a zip and open the issue page in your browser " +
-                    "to send them. Coming in a later version.",
+                subtitle = "Send logs",
+                info = "Packs the daemon's logs from the head unit into one zip, with the WiFi password and the VIN " +
+                    "hidden, and opens the issue page so you can attach it. Do it before you restart the car: the " +
+                    "logs are in memory and are gone after a reboot.",
                 modifier = Modifier.weight(1f),
+                onClick = { vm.chooseContribute() },
             )
         }
         Spacer(Modifier.height(8.dp))
@@ -480,16 +483,16 @@ private fun UnitBody(inst: InstallController, u: UnitStatus, onChange: () -> Uni
                 // the file is read only on request: it takes a while, and the settings below do not need it
                 Text(
                     if (version == null) {
-                        "Reads nbt-aad from the head unit (it can take a minute) to find its version and to compare it with the official releases."
+                        "Reads nbt-aad from the head unit (it can take a minute) for its version. Also checks if it is an official release."
                     } else {
-                        "Reads nbt-aad from the head unit (it can take a minute) to compare it with the official releases."
+                        "Reads nbt-aad from the head unit (it can take a minute) to confirm the version. Also checks if it is an official release."
                     },
                     fontSize = 12.sp,
                     color = soft,
                     modifier = Modifier.padding(top = 4.dp),
                 )
                 OutlinedButton(onClick = { inst.checkInstalled() }, enabled = !inst.working) {
-                    Text("CHECK IF OFFICIAL", fontSize = 12.sp)
+                    Text("CHECK VERSION", fontSize = 12.sp)
                 }
                 if (inst.fileError) Text(inst.fileMessage, fontSize = 12.sp, color = Red)
             }

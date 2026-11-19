@@ -1,6 +1,9 @@
 package com.nbtaad.editor.install
 
+import com.nbtaad.editor.contribute.HeadLog
+import com.nbtaad.editor.contribute.LogFinder
 import com.nbtaad.editor.log.AppLog
+import com.nbtaad.editor.net.SshCancelled
 import com.nbtaad.editor.net.SshSession
 import com.nbtaad.editor.update.UpdateLogic
 import java.io.IOException
@@ -124,6 +127,71 @@ object HeadUnit {
      */
     fun readInstalledFile(host: String): DaemonFile? =
         SshSession(host).use { ssh -> readDaemon(ssh, locate(ssh)) }
+
+    // ---- logs for the project (the CONTRIBUTE page) ----
+
+    /** What reading one file gave: its bytes, or what went wrong (then [bytes] is null). */
+    class FileRead(val name: String, val bytes: ByteArray?, val problem: String?)
+
+    /** The daemon's log files on the head unit, with sizes (read only, one quick command). */
+    fun findLogs(host: String): List<HeadLog> =
+        SshSession(host).use { ssh ->
+            val logs = LogFinder.parse(ssh.exec(RemoteScripts.findLogs(), timeoutMs = 30_000).text)
+            AppLog.i("Contribute", "Logs on the head unit: " + logs.joinToString { "${it.path} (${it.size})" }.ifEmpty { "none" })
+            logs
+        }
+
+    private val SAFE_PATH = Regex("^/[A-Za-z0-9._/@+-]+$")
+
+    /**
+     * Reads the chosen logs, and with [withEnv] nbt-aad.env, one after the other over one connection (`cat` is what the
+     * head unit has; it is slow, about 30 KB/s on the first car this was tried on, so [onProgress] says which file and how
+     * far, and [cancelled] stops it). A file that cannot be read is told in its result and the others go on.
+     */
+    fun readLogs(
+        host: String,
+        logs: List<HeadLog>,
+        withEnv: Boolean,
+        onProgress: (name: String, done: Long, total: Long) -> Unit,
+        cancelled: () -> Boolean,
+    ): List<FileRead> =
+        SshSession(host).use { ssh ->
+            val out = ArrayList<FileRead>()
+            fun read(name: String, path: String, size: Long): FileRead {
+                if (!SAFE_PATH.matches(path)) return FileRead(name, null, "the file name has characters the app will not pass on")
+                onProgress(name, 0, size)
+                val t0 = System.currentTimeMillis()
+                return try {
+                    val r = ssh.exec(
+                        "cat $path",
+                        timeoutMs = if (size > 0) 120_000L + size / 8 else 900_000L,
+                        onOut = { onProgress(name, it, size) },
+                        cancelled = cancelled,
+                    )
+                    if (r.exit != 0) {
+                        FileRead(name, null, r.err.trim().ifEmpty { "the head unit answered with ${r.exit}" })
+                    } else {
+                        AppLog.i("Contribute", "Read $path: ${r.out.size} bytes in ${(System.currentTimeMillis() - t0) / 1000} s")
+                        FileRead(name, r.out, null)
+                    }
+                } catch (e: SshCancelled) {
+                    throw e
+                } catch (e: Exception) {
+                    AppLog.w("Contribute", "Reading $path failed: ${e.javaClass.simpleName}: ${e.message}")
+                    FileRead(name, null, e.message ?: e.javaClass.simpleName)
+                }
+            }
+            if (withEnv) {
+                val lay = try { locate(ssh) } catch (e: SshCancelled) { throw e } catch (e: Exception) { null }
+                out += if (lay == null) {
+                    FileRead("nbt-aad.env", null, "the NBT-AAD folder was not found")
+                } else {
+                    read("nbt-aad.env", "${lay.aa}/nbt-aad.env", -1)
+                }
+            }
+            for (l in logs) out += read(l.name, l.path, l.size)
+            out
+        }
 
     /** The commands and folders the SSH login has, as text for the person to read or send on. */
     fun diagnose(host: String): String =

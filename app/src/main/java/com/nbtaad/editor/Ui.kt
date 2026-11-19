@@ -53,6 +53,7 @@ fun App(vm: MainViewModel) {
                 Screen.OPTIONS -> OptionsScreen(vm)
                 Screen.INSTALL -> InstallScreen(vm)
                 Screen.EXPERIMENTAL -> ExperimentalScreen(vm)
+                Screen.CONTRIBUTE -> ContributeScreen(vm)
             }
             ThemeToggle(vm, Modifier.align(Alignment.TopEnd).padding(4.dp))
         }

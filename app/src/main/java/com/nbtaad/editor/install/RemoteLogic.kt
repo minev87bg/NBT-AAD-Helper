@@ -137,15 +137,20 @@ object RemoteScripts {
 
     /**
      * The build lines of the daemon's RAM log (`grep` is there, unlike wc/head/od; the project's update guide asks for the
-     * same). The log is in RAM: it is there once Android Auto has been started since the head unit booted.
+     * same). The log is in RAM: it is there once Android Auto has been started since the head unit booted. Android Auto
+     * runs on the hu-omap processor, which this login may reach only as /net/hu-omap (as it does the /opt/aa folder), so both
+     * names are tried.
      */
     private val BUILD_PART = """
-        if [ -f /dev/shmem/nbt-aad.log ]; then
-          echo "BUILD-BEGIN"
-          grep "Build: " /dev/shmem/nbt-aad.log 2>/dev/null
-          echo ""
-          echo "BUILD-END"
-        fi
+        for d in /dev/shmem /net/hu-omap/dev/shmem; do
+          if [ -f ¤d/nbt-aad.log ]; then
+            echo "BUILD-BEGIN"
+            grep "Build: " ¤d/nbt-aad.log 2>/dev/null
+            echo ""
+            echo "BUILD-END"
+            break
+          fi
+        done
     """.trimIndent()
 
     private fun statusPart(hasPlugin: Boolean): String = """
@@ -507,6 +512,22 @@ object RemoteScripts {
 
     /** Removes the files an interrupted install left waiting to be moved into place (never a .swap: that may be the live one). */
     fun cleanStaging(aa: String): String = sh("cd @AA@ 2>/dev/null && rm -rf nbt-aad.new NbtAad.new\nexit 0", aa)
+
+    /**
+     * The daemon's log files (nbt-aad.log, nbt-aad-app.log, and the ones on a USB stick) with their sizes, in the places the
+     * project's guides name: /dev/shmem (RAM, gone at the next reboot) and the stick, each as this login or the hu-omap
+     * processor sees it. `ls -l` is what the head unit has for sizes. Read the result with LogFinder.parse.
+     */
+    fun findLogs(): String = sh(
+        """
+        for d in /dev/shmem /net/hu-omap/dev/shmem /mnt/umass* /net/hu-omap/mnt/umass*; do
+          if [ -d ¤d ]; then
+            ls -l ¤d/nbt-aad*.log 2>/dev/null
+          fi
+        done
+        exit 0
+        """,
+    )
 
     /** Which commands and folders the SSH login of the head unit has: shown to the person, who can send it on. */
     fun diagnose(): String = sh(

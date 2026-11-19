@@ -272,7 +272,7 @@ class InstallController(
 
     /**
      * Reads the installed nbt-aad back whole, for its version and the comparison with the official releases. Only on
-     * request (CHECK IF OFFICIAL): it can take a minute, and the rest of the card does not need it.
+     * request (CHECK VERSION): it can take a minute, and the rest of the card does not need it.
      */
     fun checkInstalled() {
         val u = unit ?: return

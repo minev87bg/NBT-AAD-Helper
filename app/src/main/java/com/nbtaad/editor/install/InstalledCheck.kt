@@ -125,9 +125,9 @@ object InstalledCheck {
                 Tone.WARN,
             )
             Origin.UNLISTED -> Described(
-                "Not an official release",
-                "No release on Sq00ky's Releases page has this version or this file. Probably a test build, " +
-                    "for example one shared in an issue.",
+                "Not official, or too old",
+                "None of the newest releases on Sq00ky's Releases page has this version or this file. Probably a test " +
+                    "build, for example one shared in an issue, or a release older than the ones the app looks at.",
                 Tone.WARN,
             )
             Origin.UNKNOWN -> Described("Could not compare", v.why, Tone.PLAIN)

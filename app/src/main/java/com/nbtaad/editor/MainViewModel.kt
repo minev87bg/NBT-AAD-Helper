@@ -7,6 +7,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.nbtaad.editor.contribute.ContributeController
 import com.nbtaad.editor.data.CatalogStore
 import com.nbtaad.editor.data.CustomOptionStore
 import com.nbtaad.editor.data.Storage
@@ -19,6 +20,7 @@ import com.nbtaad.editor.env.EnvDoc
 import com.nbtaad.editor.env.Opt
 import com.nbtaad.editor.install.InstallController
 import com.nbtaad.editor.experimental.ExperimentalController
+import com.nbtaad.editor.experimental.Topic
 import com.nbtaad.editor.log.AppLog
 import com.nbtaad.editor.log.exportName
 import com.nbtaad.editor.log.saveTo
@@ -43,7 +45,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
-enum class Screen { DETECT, HUB, OPTIONS, INSTALL, EXPERIMENTAL }
+enum class Screen { DETECT, HUB, OPTIONS, INSTALL, EXPERIMENTAL, CONTRIBUTE }
 enum class UpdatePhase { IDLE, CHECKING, CURRENT, AVAILABLE, DOWNLOADING, FAILED }
 enum class SaveStatus { RUNNING, OK, FAIL }
 enum class LineKind { INFO, OK, ERROR }
@@ -110,6 +112,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             inst.useDownloaded(file, "$kind #${topic.number}, shared by ${link.by.ifBlank { "someone" }}", topic.url)
             screen = Screen.INSTALL
         },
+    )
+
+    /** The Contribute page: the daemon's logs from the head unit, packed into a zip for an issue. */
+    val contribute = ContributeController(
+        ctx, viewModelScope, host = { detect.hu }, rescan = { rescanForHost() }, problem = { scanProblem },
+        headUnitVersion = { inst.unit?.installedVersion },
     )
     var themeMode by mutableStateOf(themePrefs.read())
 
@@ -583,6 +591,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun chooseExperimental() {
         exp.open()
         screen = Screen.EXPERIMENTAL
+    }
+
+    /** "Contribute": the head unit's logs into a zip for an issue ([topic]: the page it is for, when it is opened from there). */
+    fun chooseContribute(topic: Topic? = null) {
+        contribute.open(topic)
+        screen = Screen.CONTRIBUTE
     }
 
     /** A setting named in an issue is offered for "Additional options" of the settings page. */
