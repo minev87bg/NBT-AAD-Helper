@@ -8,6 +8,7 @@ import androidx.compose.runtime.setValue
 import com.nbtaad.editor.log.AppLog
 import com.nbtaad.editor.net.NetworkBinder
 import com.nbtaad.editor.net.Reach
+import com.nbtaad.editor.net.Online
 import com.nbtaad.editor.net.friendlyError
 import com.nbtaad.editor.net.runOnHeadUnit
 import kotlinx.coroutines.CoroutineScope
@@ -113,7 +114,7 @@ class InstallController(
                     "No internet. The releases list and downloads need it (mobile data, or a WiFi with internet). " +
                         "A file already on the phone can be used without."
                 } else {
-                    "Could not load the releases: ${friendlyError(e)}"
+                    "Could not load the releases: ${Online.describe(e)}"
                 }
             } finally {
                 releasesBusy = false
@@ -148,7 +149,7 @@ class InstallController(
             } catch (e: Exception) {
                 AppLog.e("Releases", "Getting ${r.tag} failed", e)
                 prepError = true
-                prepMessage = "Could not get ${r.tag}: ${friendlyError(e)}"
+                prepMessage = "Could not get ${r.tag}: ${Online.describe(e)}"
             } finally {
                 prepBusy = false
                 prepFraction = null

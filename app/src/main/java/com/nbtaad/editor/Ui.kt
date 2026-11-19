@@ -91,16 +91,27 @@ internal fun AppLogDialog(vm: MainViewModel) {
     )
 }
 
-/** Small corner control cycling Auto (follows the phone) -> Light -> Dark -> Auto. */
+/** Small corner control cycling Theme Auto (follows the phone) -> Theme White -> Theme Dark -> Theme Auto. */
 @Composable
 private fun ThemeToggle(vm: MainViewModel, modifier: Modifier) {
     val label = when (vm.themeMode) {
-        ThemeMode.SYSTEM -> "Auto"
-        ThemeMode.LIGHT -> "Light"
-        ThemeMode.DARK -> "Dark"
+        ThemeMode.SYSTEM -> "Theme Auto"
+        ThemeMode.LIGHT -> "Theme White"
+        ThemeMode.DARK -> "Theme Dark"
     }
-    TextButton(onClick = { vm.cycleTheme() }, modifier = modifier) {
-        Text(label, fontSize = 12.sp)
+    // a soft backing, so text scrolling underneath it does not run into the label
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+    ) {
+        TextButton(
+            onClick = { vm.cycleTheme() },
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+            modifier = Modifier.height(32.dp),
+        ) {
+            Text(label, fontSize = 12.sp)
+        }
     }
 }
 

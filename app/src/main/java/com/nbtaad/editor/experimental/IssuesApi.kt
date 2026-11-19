@@ -5,6 +5,7 @@ import com.nbtaad.editor.install.Limits
 import com.nbtaad.editor.install.ReleaseLogic
 import com.nbtaad.editor.install.SourceFile
 import com.nbtaad.editor.log.AppLog
+import com.nbtaad.editor.net.Answered
 import com.nbtaad.editor.net.Internet
 import java.io.ByteArrayOutputStream
 import java.io.IOException
@@ -18,7 +19,7 @@ object IssuesApi {
     /** What came back, and how many requests GitHub says are left this hour (null when it did not say). */
     class Fetched<T>(val value: T, val remaining: Int?)
 
-    class RateLimited(resetAt: Long?) : IOException(RateLimit.usedUp(resetAt))
+    class RateLimited(resetAt: Long?) : Answered(RateLimit.usedUp(resetAt))
 
     private class Answer(val text: String, val remaining: Int?)
 

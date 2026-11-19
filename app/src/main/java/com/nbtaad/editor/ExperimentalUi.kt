@@ -12,14 +12,19 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedCard
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -33,6 +38,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -42,7 +49,7 @@ import com.nbtaad.editor.experimental.ExperimentalController
 import com.nbtaad.editor.experimental.FileKind
 import com.nbtaad.editor.experimental.FileLink
 import com.nbtaad.editor.experimental.Mentions
-import com.nbtaad.editor.experimental.PageText
+import com.nbtaad.editor.experimental.Markdown
 import com.nbtaad.editor.experimental.Topic
 import com.nbtaad.editor.install.ReleaseLogic
 
@@ -225,9 +232,31 @@ private fun TopicDetail(vm: MainViewModel, t: Topic) {
                     OutlinedButton(onClick = { openLink(uri, t.url) }) { Text("OPEN ON GITHUB", fontSize = 12.sp) }
                     Spacer(Modifier.padding(horizontal = 4.dp))
                     OutlinedButton(onClick = { exp.toggleSummary() }, enabled = !exp.commentsBusy) {
-                        Text(if (exp.summary == null) "SUMMARIZE" else "HIDE SUMMARY", fontSize = 12.sp)
+                        Text(if (exp.summary == null) "QUICK SUMMARY" else "HIDE SUMMARY", fontSize = 12.sp)
                     }
                 }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedButton(onClick = { exp.summarizeWithAi() }, enabled = !exp.aiBusy && !exp.commentsBusy) {
+                        Text(
+                            when {
+                                exp.aiBusy -> "WRITING…"
+                                exp.aiText != null -> "SUMMARIZE AGAIN"
+                                else -> "SUMMARIZE WITH AI"
+                            },
+                            fontSize = 12.sp,
+                        )
+                    }
+                    Spacer(Modifier.padding(horizontal = 2.dp))
+                    TextButton(onClick = { exp.openKeyDialog() }) {
+                        Text(if (exp.aiKeySet) "AI key" else "Set AI key", fontSize = 12.sp)
+                    }
+                }
+                if (exp.aiBusy) {
+                    Text("Claude is reading the page…", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    LinearProgressIndicator(Modifier.fillMaxWidth().padding(vertical = 4.dp))
+                }
+                if (exp.aiMessage.isNotEmpty()) Text(exp.aiMessage, fontSize = 12.sp, color = Red)
+                exp.aiText?.let { AiCard(it) { exp.hideAi() } }
                 if (exp.commentsBusy) {
                     Text("Loading the comments…", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     LinearProgressIndicator(Modifier.fillMaxWidth().padding(vertical = 4.dp))
@@ -237,12 +266,12 @@ private fun TopicDetail(vm: MainViewModel, t: Topic) {
                 if (files.isNotEmpty()) FilesCard(exp, files) { openLink(uri, it) }
                 if (settings.isNotEmpty()) SettingsCard(vm, settings)
                 Spacer(Modifier.height(10.dp))
-                val body = PageText.clean(t.body)
-                Text(
-                    if (body.isEmpty()) "(no text)" else body,
-                    fontSize = 13.sp,
-                    color = if (body.isEmpty()) MaterialTheme.colorScheme.onSurfaceVariant else Color.Unspecified,
-                )
+                val body = remember(t.body) { Markdown.parse(t.body) }
+                if (body.isEmpty()) {
+                    Text("(no text)", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } else {
+                    MarkdownView(body)
+                }
                 if (!comments.isNullOrEmpty()) {
                     Spacer(Modifier.height(14.dp))
                     Text("${comments.size} comment${if (comments.size == 1) "" else "s"}", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
@@ -251,6 +280,95 @@ private fun TopicDetail(vm: MainViewModel, t: Topic) {
         }
         items(comments ?: emptyList()) { c -> CommentCard(c) }
     }
+    if (exp.aiKeyDialog) AiKeyDialog(exp)
+}
+
+@Composable
+private fun AiCard(text: String, onHide: () -> Unit) {
+    var showInfo by remember { mutableStateOf(false) }
+    val blocks = remember(text) { Markdown.parse(text) }
+    OutlinedCard(Modifier.fillMaxWidth().padding(top = 10.dp)) {
+        Column(Modifier.padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("AI summary", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                Box {
+                    InfoDot { showInfo = true }
+                    if (showInfo) {
+                        InfoBalloon(
+                            "AI summary",
+                            "Written by Claude (${com.nbtaad.editor.experimental.AiLogic.MODEL}, Anthropic) from the text of this " +
+                                "page: the first post and the comments. It can make mistakes or leave things out, so read the page " +
+                                "itself when it matters. The text of the page was sent to Anthropic with your key.",
+                            mono = false,
+                        ) { showInfo = false }
+                    }
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+            MarkdownView(blocks)
+            Text(
+                "Written by Claude from the text of this page. It can make mistakes.",
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+            TextButton(onClick = onHide, contentPadding = PaddingValues(0.dp)) { Text("Hide", fontSize = 12.sp) }
+        }
+    }
+}
+
+@Composable
+private fun AiKeyDialog(exp: ExperimentalController) {
+    var text by remember { mutableStateOf("") }
+    val uri = LocalUriHandler.current
+    AlertDialog(
+        onDismissRequest = { exp.closeKeyDialog() },
+        title = { Text("AI summary") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                Text(
+                    "SUMMARIZE WITH AI sends the text of the open page (title, first post and comments, all public on " +
+                        "GitHub) to Claude, an AI model from Anthropic, which writes a short summary. That needs your own " +
+                        "Anthropic API key.",
+                    fontSize = 13.sp,
+                )
+                Text(
+                    "To get one: sign in at console.anthropic.com, add a little credit and create a key under API keys. " +
+                        "Anthropic bills each summary to your account; a page usually costs about a cent or less, and the " +
+                        "console shows your usage.",
+                    fontSize = 13.sp,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+                TextButton(
+                    onClick = { openLink(uri, "https://console.anthropic.com/settings/keys") },
+                    contentPadding = PaddingValues(0.dp),
+                ) { Text("Open console.anthropic.com", fontSize = 12.sp) }
+                Text(
+                    "The key stays on this phone, in the app's private storage, and goes only to api.anthropic.com. " +
+                        "It is never written to the app log.",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    label = { Text(if (exp.aiKeySet) "New key (a key is saved)" else "API key (sk-ant-…)") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+                )
+                if (exp.aiKeyNote.isNotEmpty()) Text(exp.aiKeyNote, fontSize = 12.sp, color = Red, modifier = Modifier.padding(top = 4.dp))
+            }
+        },
+        confirmButton = { TextButton(onClick = { exp.saveKey(text) }) { Text("SAVE KEY") } },
+        dismissButton = {
+            Row {
+                if (exp.aiKeySet) TextButton(onClick = { exp.removeKey() }) { Text("REMOVE KEY") }
+                TextButton(onClick = { exp.closeKeyDialog() }) { Text("CANCEL") }
+            }
+        },
+    )
 }
 
 @Composable
@@ -267,7 +385,7 @@ private fun SummaryCard(lines: List<String>, links: List<String>, onLink: (Strin
                             "In short",
                             "A digest made on the phone from the words of the page: who wrote it, what it says first, " +
                                 "the latest comment, the settings and files it names, and its links. It is not an AI " +
-                                "summary, so read the page itself when it matters.",
+                                "summary (for that, use SUMMARIZE WITH AI), so read the page itself when it matters.",
                             mono = false,
                         ) { showInfo = false }
                     }
@@ -356,7 +474,8 @@ private fun SettingsCard(vm: MainViewModel, settings: List<String>) {
 @Composable
 private fun CommentCard(c: Comment) {
     var expanded by remember(c) { mutableStateOf(false) }
-    val text = remember(c) { PageText.clean(c.body) }
+    val full = remember(c) { Markdown.parse(c.body) }
+    val short = remember(full) { Markdown.shorten(full) }
     OutlinedCard(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         Column(Modifier.padding(12.dp)) {
             Text(
@@ -365,14 +484,13 @@ private fun CommentCard(c: Comment) {
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Text(
-                if (text.isEmpty()) "(no text)" else text,
-                fontSize = 13.sp,
-                maxLines = if (expanded) Int.MAX_VALUE else 8,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(top = 4.dp),
-            )
-            if (text.length > 400 || text.count { it == '\n' } > 7) {
+            Spacer(Modifier.height(6.dp))
+            if (full.isEmpty()) {
+                Text("(no text)", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else {
+                MarkdownView(if (expanded || !short.second) full else short.first)
+            }
+            if (short.second) {
                 TextButton(onClick = { expanded = !expanded }, contentPadding = PaddingValues(0.dp)) {
                     Text(if (expanded) "Show less" else "Show more", fontSize = 12.sp)
                 }

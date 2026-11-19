@@ -30,6 +30,7 @@ import com.nbtaad.editor.net.EnvRemote
 import com.nbtaad.editor.net.Hsfz
 import com.nbtaad.editor.net.NetworkBinder
 import com.nbtaad.editor.net.Reach
+import com.nbtaad.editor.net.Online
 import com.nbtaad.editor.net.friendlyError
 import com.nbtaad.editor.net.runOnHeadUnit
 import com.nbtaad.editor.update.Check
@@ -252,9 +253,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             } catch (e: Exception) {
                 AppLog.w("Update", "Update check failed: ${e.javaClass.simpleName}: ${e.message}")
                 updatePhase = UpdatePhase.FAILED
-                val offline = e is java.net.UnknownHostException || e is java.net.ConnectException ||
-                    e is java.net.SocketTimeoutException || e.message == "No network with internet"
-                updateMessage = if (offline) "" else "Update check failed: ${friendlyError(e)}"
+                // no internet: the settings sync line already says so; anything else is worded for the internet, not the car
+                if (Online.offline(e)) updatePhase = UpdatePhase.IDLE
+                updateMessage = if (Online.offline(e)) "" else "Update check failed: ${Online.describe(e)}"
             }
         }
     }
@@ -290,7 +291,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             } catch (e: Exception) {
                 AppLog.e("Update", "The update failed", e)
                 updatePhase = UpdatePhase.FAILED
-                updateMessage = "The update failed: ${friendlyError(e)}"
+                updateMessage = "The update failed: ${Online.describe(e)}"
             }
         }
     }

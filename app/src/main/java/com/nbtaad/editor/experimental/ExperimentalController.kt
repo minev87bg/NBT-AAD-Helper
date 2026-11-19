@@ -6,7 +6,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.nbtaad.editor.install.SourceFile
 import com.nbtaad.editor.log.AppLog
-import com.nbtaad.editor.net.friendlyError
+import com.nbtaad.editor.net.Online
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -46,6 +46,15 @@ class ExperimentalController(
     var commentsMessage by mutableStateOf(""); private set
     var summary by mutableStateOf<Summary?>(null); private set
 
+    // the AI summary: written by Claude with the person's own Anthropic key
+    private val keys = AiKeyStore(ctx)
+    var aiKeySet by mutableStateOf(keys.get() != null); private set
+    var aiKeyDialog by mutableStateOf(false); private set
+    var aiKeyNote by mutableStateOf(""); private set
+    var aiBusy by mutableStateOf(false); private set
+    var aiText by mutableStateOf<String?>(null); private set
+    var aiMessage by mutableStateOf(""); private set
+
     var downloadBusy by mutableStateOf(false); private set
     var downloadMessage by mutableStateOf(""); private set
     var downloadError by mutableStateOf(false); private set
@@ -70,7 +79,7 @@ class ExperimentalController(
     private fun fail(prefix: String, e: Exception) {
         AppLog.w("Experimental", "$prefix: ${e.javaClass.simpleName}: ${e.message}")
         error = true
-        message = if (e is IssuesApi.RateLimited) e.message ?: "" else "$prefix: ${friendlyError(e)}"
+        message = if (e is IssuesApi.RateLimited) e.message ?: "" else "$prefix: ${Online.describe(e)}"
     }
 
     fun refresh() {
@@ -122,7 +131,7 @@ class ExperimentalController(
                 AppLog.i("Experimental", scanNote)
             } catch (e: Exception) {
                 AppLog.w("Experimental", "Scan failed: ${e.javaClass.simpleName}: ${e.message}")
-                scanNote = if (e is IssuesApi.RateLimited) e.message ?: "" else "Could not scan: ${friendlyError(e)}"
+                scanNote = if (e is IssuesApi.RateLimited) e.message ?: "" else "Could not scan: ${Online.describe(e)}"
             } finally {
                 scanBusy = false
             }
@@ -136,6 +145,8 @@ class ExperimentalController(
         downloadError = false
         settingNote = ""
         commentsMessage = ""
+        aiText = null
+        aiMessage = ""
         val cached = commentCache[t.number]
         when {
             cached != null -> comments = cached
@@ -152,7 +163,7 @@ class ExperimentalController(
                     } catch (e: Exception) {
                         AppLog.w("Experimental", "Comments of #${t.number} failed: ${e.javaClass.simpleName}: ${e.message}")
                         if (selected?.number == t.number) {
-                            commentsMessage = if (e is IssuesApi.RateLimited) e.message ?: "" else "Could not load the comments: ${friendlyError(e)}"
+                            commentsMessage = if (e is IssuesApi.RateLimited) e.message ?: "" else "Could not load the comments: ${Online.describe(e)}"
                             comments = emptyList()
                         }
                     } finally {
@@ -167,6 +178,74 @@ class ExperimentalController(
         selected = null
         comments = null
         summary = null
+        aiText = null
+        aiMessage = ""
+    }
+
+    /** The button: needs the key first (the dialog opens when there is none), then asks Claude. */
+    fun summarizeWithAi() {
+        val t = selected ?: return
+        if (aiBusy) return
+        val key = keys.get()
+        if (key == null) {
+            openKeyDialog()
+            return
+        }
+        if (commentsBusy) {
+            aiMessage = "The comments are still loading. Try again in a moment."
+            return
+        }
+        val list = comments ?: emptyList()
+        aiBusy = true
+        aiMessage = ""
+        scope.launch(Dispatchers.IO) {
+            try {
+                val text = AiClient.summarize(ctx, key, t, list)
+                if (selected?.number == t.number) aiText = text
+            } catch (e: Exception) {
+                AppLog.w("AI", "Summary failed: ${e.javaClass.simpleName}: ${e.message}")
+                if (selected?.number == t.number) aiMessage = Online.describe(e)
+            } finally {
+                aiBusy = false
+            }
+        }
+    }
+
+    fun hideAi() {
+        aiText = null
+        aiMessage = ""
+    }
+
+    fun openKeyDialog() {
+        aiKeyNote = ""
+        aiKeyDialog = true
+    }
+
+    fun closeKeyDialog() {
+        aiKeyDialog = false
+        aiKeyNote = ""
+    }
+
+    /** Keeps the key when it looks like one. The answer says whether the dialog may close. */
+    fun saveKey(raw: String): Boolean {
+        if (!AiLogic.looksLikeKey(raw)) {
+            aiKeyNote = "That does not look like an Anthropic key. It starts with sk-ant- and has no spaces."
+            return false
+        }
+        keys.set(raw)
+        aiKeySet = true
+        aiMessage = ""
+        closeKeyDialog()
+        AppLog.i("AI", "An Anthropic key was saved on this phone")
+        return true
+    }
+
+    fun removeKey() {
+        keys.clear()
+        aiKeySet = false
+        aiText = null
+        closeKeyDialog()
+        AppLog.i("AI", "The Anthropic key was removed")
     }
 
     /** Shows or hides the digest of the open page. */
@@ -189,7 +268,7 @@ class ExperimentalController(
             } catch (e: Exception) {
                 AppLog.e("Experimental", "Download of ${link.name} failed", e)
                 downloadError = true
-                downloadMessage = "Could not get ${link.name}: ${friendlyError(e)}"
+                downloadMessage = "Could not get ${link.name}: ${Online.describe(e)}"
             } finally {
                 downloadBusy = false
             }

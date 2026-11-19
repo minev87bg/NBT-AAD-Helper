@@ -14,8 +14,11 @@ import java.net.URL
  *
  * The request goes out over a network that really has internet (mobile data, a WiFi repeater with internet,
  * Ethernet with internet), picked by looking at the network's capabilities. If nothing is marked as validated, the
- * default route is tried once, it may still work.
+ * phone's default network is tried once, it may still work.
  */
+/** The server answered, and what it said is the answer (a refused key, a used-up limit): no other network is tried. */
+open class Answered(message: String) : IOException(message)
+
 object Internet {
     /** Runs [block] with a way to open connections; the next network is tried when it throws. */
     fun <T> run(ctx: Context, block: (open: (URL) -> HttpURLConnection) -> T): T {
@@ -25,17 +28,26 @@ object Internet {
         for (n in nets) {
             try {
                 return block { u -> n.openConnection(u) as HttpURLConnection }
+            } catch (e: Answered) {
+                throw e
             } catch (e: Exception) {
                 AppLog.w("Net", "Request failed on network $n: ${e.javaClass.simpleName}: ${e.message}")
                 last = e
             }
         }
         if (nets.isEmpty()) {
-            try {
-                return block { u -> u.openConnection() as HttpURLConnection }
-            } catch (e: Exception) {
-                AppLog.w("Net", "Request failed without a validated network: ${e.javaClass.simpleName}: ${e.message}")
-                last = e
+            // nothing is marked as having internet (it may just have connected): try the phone's own default network,
+            // asked for by name, so a network the app was bound to for the car is never what answers
+            val def = try { cm.activeNetwork } catch (_: Exception) { null }
+            if (def != null) {
+                try {
+                    return block { u -> def.openConnection(u) as HttpURLConnection }
+                } catch (e: Answered) {
+                    throw e
+                } catch (e: Exception) {
+                    AppLog.w("Net", "Request failed on the default network: ${e.javaClass.simpleName}: ${e.message}")
+                    last = e
+                }
             }
         }
         throw last ?: IOException("No network with internet")

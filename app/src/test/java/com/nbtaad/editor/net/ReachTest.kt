@@ -91,4 +91,27 @@ class ReachTest {
             assertTrue(e.message!!.contains("DETECT CAR"))
         }
     }
+
+    @Test
+    fun internetFailuresAreNeverWordedAsHeadUnitProblems() {
+        // a timeout or refusal toward GitHub is "no internet", not "Timed out talking to the head unit"
+        assertTrue(Online.offline(java.net.SocketTimeoutException("failed to connect to github.com after 8000ms")))
+        assertTrue(Online.offline(java.net.UnknownHostException("api.github.com")))
+        assertTrue(Online.offline(java.net.ConnectException("Connection refused")))
+        assertTrue(Online.offline(java.net.SocketException("Network is unreachable")))
+        assertTrue(Online.offline(IOException("No network with internet")))
+        assertTrue(Online.offline(RuntimeException("wrapped", javax.net.ssl.SSLException("Connection reset"))))
+        assertEquals(Online.NO_INTERNET, Online.describe(java.net.SocketTimeoutException("timed out")))
+        assertEquals(Online.NO_INTERNET, Online.describe(java.net.ConnectException("Connection refused")))
+        for (e in listOf<Throwable>(
+            java.net.SocketTimeoutException("timed out"), java.net.ConnectException("Connection refused"),
+        )) {
+            assertFalse(Online.describe(e).contains("head unit", ignoreCase = true))
+            assertFalse(Online.describe(e).contains("SSH", ignoreCase = true))
+        }
+        // GitHub answered, so its own words are shown
+        assertFalse(Online.offline(IOException("GitHub answered 500")))
+        assertEquals("GitHub answered 500", Online.describe(IOException("GitHub answered 500")))
+        assertEquals("GitHub does not know this page (404).", Online.describe(IOException("GitHub does not know this page (404).")))
+    }
 }

@@ -8,6 +8,38 @@ import java.io.IOException
  */
 class SshUnreachable(message: String, cause: Throwable? = null) : IOException(message, cause)
 
+/**
+ * Wording for requests to the internet (GitHub). [friendlyError] is for the head unit ("Timed out talking to the head
+ * unit") and must not be shown for these: an internet failure has nothing to do with the car.
+ */
+object Online {
+    const val NO_INTERNET = "No internet connection."
+
+    /** Whether the request failed because the phone has no (working) internet, as opposed to GitHub answering badly. */
+    fun offline(e: Throwable): Boolean {
+        var t: Throwable? = e
+        var depth = 0
+        while (t != null && depth < 6) {
+            if (t is java.net.UnknownHostException || t is java.net.ConnectException ||
+                t is java.net.NoRouteToHostException || t is java.net.SocketTimeoutException ||
+                t is java.net.SocketException || t is javax.net.ssl.SSLException
+            ) return true
+            val m = t.message ?: ""
+            if (listOf("No network with internet", "Unable to resolve host", "Network is unreachable", "failed to connect")
+                    .any { m.contains(it, ignoreCase = true) }
+            ) return true
+            t = t.cause
+            depth++
+        }
+        return false
+    }
+
+    fun describe(e: Throwable): String = when {
+        offline(e) -> NO_INTERNET
+        else -> e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName
+    }
+}
+
 object Reach {
     /** Shown where an action needs the head unit and the first screen found none (or was skipped). */
     const val NO_UNIT = "No head unit is connected. Go back to the first screen and press DETECT CAR."
