@@ -1,4 +1,4 @@
-# NBT-AAD-Helper
+# NBT AAD Helper
 
 Android app that edits `/opt/aa/nbt-aad.env` on a BMW / Toyota Supra NBT Evo head unit running
 [NBT-AAD](https://github.com/Sq00ky/Supra-iDrive6-Android-Auto) (native Android Auto).

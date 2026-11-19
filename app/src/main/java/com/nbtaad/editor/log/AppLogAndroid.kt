@@ -55,7 +55,7 @@ fun AppLog.exportName(): String =
 /** Writes a short header and the whole log to [uri] (a file the person chose). Returns the number of bytes. */
 fun AppLog.saveTo(ctx: Context, uri: Uri): Int {
     val header = buildString {
-        appendLine("NBT-AAD Helper log")
+        appendLine("NBT AAD Helper log")
         appendLine("App: $appVersion")
         appendLine("Phone: ${device()}")
         appendLine("Saved: ${ZonedDateTime.now().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)}")
