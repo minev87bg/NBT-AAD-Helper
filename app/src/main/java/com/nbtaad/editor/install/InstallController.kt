@@ -5,6 +5,9 @@ import android.net.Uri
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.nbtaad.editor.env.AppliedOption
+import com.nbtaad.editor.env.AppliedOptions
+import com.nbtaad.editor.env.Opt
 import com.nbtaad.editor.log.AppLog
 import com.nbtaad.editor.net.NetworkBinder
 import com.nbtaad.editor.net.Reach
@@ -56,6 +59,8 @@ class InstallController(
     private val rescan: () -> String?,
     /** Why the last look for the car found no head unit, for the failure message. */
     private val problem: () -> String? = { null },
+    /** The list of settings (from the README), which says what the values in nbt-aad.env mean. */
+    private val catalog: () -> List<Opt> = { emptyList() },
 ) {
     // the project's releases
     var releases by mutableStateOf<List<ReleaseInfo>?>(null)
@@ -233,17 +238,23 @@ class InstallController(
     private fun lookingNote(): String =
         if (host() == null) "No car known yet. Looking for the car…" else "No connection. Looking for the car again…"
 
+    /**
+     * Looks at the head unit: the folders, nbt-aad.env, and the installed nbt-aad read back and hashed. What is known
+     * before the last step is put on the card at once ([unit] is then a status without [UnitStatus.daemonFile]), and the
+     * card says that the file is still being checked.
+     */
     fun readUnit() {
         if (unitBusy) return
         unitBusy = true
         unitError = false
+        unit = null
         unitMessage = if (host() == null) "Looking for the car…" else "Looking at the head unit…"
         scope.launch(Dispatchers.IO) {
             try {
                 NetworkBinder.bindToLocalNetwork(ctx)
                 unit = runOnHeadUnit(host, rescan, onRescan = { unitMessage = lookingNote() }, whyNot = problem) {
                     unitMessage = "Looking at the head unit…"
-                    HeadUnit.status(it)
+                    HeadUnit.status(it) { first -> unit = first }
                 }
                 unitMessage = ""
                 unit?.let { AppLog.i("Unit", "Status: ${it.describe()}") }
@@ -256,6 +267,25 @@ class InstallController(
             }
         }
     }
+
+    /** The settings that nbt-aad.env switches on, as read with the status (empty without a status or a file). */
+    fun appliedOptions(): List<AppliedOption> = unit?.envText?.let { AppliedOptions.of(it, catalog()) } ?: emptyList()
+
+    /**
+     * Is the installed nbt-aad an official release? Judged from what was read back and the project's releases, so it
+     * follows both: null when there is no status or no daemon to judge, otherwise a verdict (which says when the
+     * releases are not loaded).
+     */
+    fun verdict(): InstalledVerdict? {
+        val u = unit ?: return null
+        if (!u.hasDaemon) return null
+        val f = u.daemonFile
+        return InstalledCheck.judge(u.installedVersion, f?.sha256, f?.size, releases)
+    }
+
+    /** True while the installed nbt-aad is still being read back (the card shows the rest meanwhile). */
+    val checkingDaemon: Boolean
+        get() = unitBusy && unit?.let { it.hasDaemon && it.daemonFile == null && !it.daemonUnreadable } == true
 
     // ---------------- install and go back ----------------
 

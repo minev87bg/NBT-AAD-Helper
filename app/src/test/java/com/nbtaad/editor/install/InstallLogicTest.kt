@@ -260,6 +260,83 @@ class InstallLogicTest {
     }
 
     @Test
+    fun theSettingsFileIsReadFromBetweenItsMarkers() {
+        // what the file says never counts as status: "F ..." or "L ..." lines inside it are just text
+        val out = "F nbt-aad x \nNBT-AAD-VERSION=v1.9.91\nENV-BEGIN\n# my settings\nNBT_A=1\nL not a plugin file\nNBT_B=two words\n\nENV-END\n"
+        val s = RemoteScripts.parseStatus("/opt/aa", "/p", out)
+        assertEquals("# my settings\nNBT_A=1\nL not a plugin file\nNBT_B=two words\n", s.envText)
+        assertFalse(s.envMissing)
+        assertTrue("a line of the file is no plugin file", s.pluginFiles.isEmpty())
+        assertEquals("v1.9.91", s.version)
+        assertTrue(s.hasDaemon)
+    }
+
+    @Test
+    fun aMissingOrEmptySettingsFileIsToldApart() {
+        val none = RemoteScripts.parseStatus("/opt/aa", "/p", "F nbt-aad x \nENV-NONE\n")
+        assertNull(none.envText)
+        assertTrue(none.envMissing)
+        val empty = RemoteScripts.parseStatus("/opt/aa", "/p", "ENV-BEGIN\n\nENV-END\n")
+        assertEquals("", empty.envText)
+        assertFalse(empty.envMissing)
+        // not asked for: nothing is known either way
+        val notAsked = RemoteScripts.parseStatus("/opt/aa", "/p", "F nbt-aad x \n")
+        assertNull(notAsked.envText)
+        assertFalse(notAsked.envMissing)
+    }
+
+    @Test
+    fun aSettingsFileThatIsCutOffIsNotTrusted() {
+        // no end marker: the connection or the command stopped halfway, so what arrived may be missing settings
+        val s = RemoteScripts.parseStatus("/opt/aa", "/p", "F nbt-aad x \nENV-BEGIN\nNBT_A=1\n")
+        assertNull(s.envText)
+        assertTrue(s.hasDaemon)
+    }
+
+    @Test
+    fun aFileWithoutALineBreakAtTheEndIsReadWhole() {
+        val s = RemoteScripts.parseStatus("/opt/aa", "/p", "ENV-BEGIN\nNBT_A=1\nNBT_B=2\nENV-END\n")
+        assertEquals("NBT_A=1\nNBT_B=2\n", s.envText)
+        val crlf = RemoteScripts.parseStatus("/opt/aa", "/p", "ENV-BEGIN\r\nNBT_A=1\r\n\r\nENV-END\r\n")
+        assertEquals("NBT_A=1\n", crlf.envText)
+    }
+
+    @Test
+    fun theStatusScriptAsksForTheSettingsFileOnlyWhenWanted() {
+        val plain = RemoteScripts.status("/opt/aa", "/p")
+        assertFalse(plain.contains("ENV-BEGIN"))
+        val withEnv = RemoteScripts.status("/opt/aa", "/p", withEnv = true)
+        assertTrue(withEnv.contains("cat /opt/aa/nbt-aad.env"))
+        assertTrue(withEnv.contains("ENV-NONE"))
+        assertFalse(withEnv.contains("\u00A4"))
+        assertFalse(withEnv.contains("@AA@"))
+        // the file is read with cat and the shell's own tests, which the car's login has
+        val envLines = withEnv.lines().dropWhile { !it.contains("ENV-BEGIN") || it.contains("echo").not() }
+        assertTrue(envLines.none { it.contains("grep") || it.contains("wc ") })
+    }
+
+    @Test
+    fun theDaemonThatWasReadBackIsPartOfTheStatus() {
+        val base = RemoteScripts.parseStatus("/opt/aa", "/p", "F nbt-aad x \n")
+        assertNull(base.installedVersion)
+        val withFile = base.withDaemonFile(DaemonFile(900_000, "ab".repeat(32), "v1.9.112"))
+        // the head unit's own tools found no version (the car's grep): the one read from the file is used
+        assertEquals("v1.9.112", withFile.installedVersion)
+        assertFalse(withFile.daemonUnreadable)
+        assertTrue(withFile.describe().contains("daemon read back 900000 bytes"))
+        // and what its own tools found wins
+        val named = RemoteScripts.parseStatus("/opt/aa", "/p", "F nbt-aad x \nNBT-AAD-VERSION=v1.9.1\n")
+            .withDaemonFile(DaemonFile(1, "cd".repeat(32), "v2.0.0"))
+        assertEquals("v1.9.1", named.installedVersion)
+        val failed = base.withDaemonFile(null)
+        assertTrue(failed.daemonUnreadable)
+        assertNull(failed.daemonFile)
+        // the settings text survives the copy
+        val env = RemoteScripts.parseStatus("/opt/aa", "/p", "ENV-BEGIN\nNBT_A=1\nENV-END\n").withDaemonFile(null)
+        assertEquals("NBT_A=1\n", env.envText)
+    }
+
+    @Test
     fun aHeadUnitWithoutWcStillShowsItsFiles() {
         // the car's SSH login has no wc: the sizes are empty, the files must still be listed
         val out = "F nbt-aad x \nF nbt-aad.old x \nL libNbtAad.so \nL NbtAad.xml \n"

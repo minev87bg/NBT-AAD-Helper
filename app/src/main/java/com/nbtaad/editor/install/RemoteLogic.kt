@@ -9,6 +9,13 @@ package com.nbtaad.editor.install
 /** One file in the NBT-AAD folder: its size (-1 when the head unit has no tool to tell) and whether it can be run. */
 class FileState(val size: Long, val executable: Boolean)
 
+/**
+ * The nbt-aad that is on the head unit, read back over SSH with `cat` (the one tool the login surely has) and looked at
+ * here: how big it is, its SHA-256, and the version it names inside. The SHA-256 is what is compared with the checksums
+ * GitHub lists for the files of the project's releases.
+ */
+class DaemonFile(val size: Long, val sha256: String, val version: String?)
+
 /** What the folders of the head unit hold, from [RemoteScripts.status]. */
 class UnitStatus(
     val aaDir: String?,
@@ -17,6 +24,14 @@ class UnitStatus(
     val pluginFiles: Map<String, Long>, // files in the plugin folder: name to size (-1 = unknown)
     val hasOldPlugin: Boolean,
     val version: String?,
+    /** The text of nbt-aad.env, when it was asked for and the file is there (else null; see [envMissing]). */
+    val envText: String? = null,
+    /** nbt-aad.env was asked for and there is no such file: it is optional, every setting then runs at its default. */
+    val envMissing: Boolean = false,
+    /** The installed nbt-aad as read back and hashed here; null while that has not been done or when it did not work. */
+    val daemonFile: DaemonFile? = null,
+    /** Reading the installed nbt-aad back was tried and did not work. */
+    val daemonUnreadable: Boolean = false,
 ) {
     val hasDaemon: Boolean get() = Names.DAEMON in files
     val hasPreviousDaemon: Boolean get() = "nbt-aad.old" in files
@@ -25,11 +40,21 @@ class UnitStatus(
     /** An nbt-aad that the head unit cannot run (for example after an install that stopped halfway). */
     val daemonBroken: Boolean get() = files[Names.DAEMON]?.let { !it.executable } ?: false
 
+    /** The version the installed daemon names itself: what the head unit's own tools found, else what was read from the file. */
+    val installedVersion: String? get() = version ?: daemonFile?.version
+
+    /** The same status with the result of reading the installed daemon back ([file] null: it did not work). */
+    fun withDaemonFile(file: DaemonFile?): UnitStatus =
+        UnitStatus(aaDir, pluginDir, files, pluginFiles, hasOldPlugin, version, envText, envMissing, file, file == null)
+
     /** One line for the log: where the folders are and what is in them. */
     fun describe(): String =
-        "folder $aaDir, plugin $pluginDir, version $version, files " +
+        "folder $aaDir, plugin $pluginDir, version $installedVersion, files " +
             files.entries.joinToString { "${it.key}(${it.value.size}${if (it.value.executable) ",exec" else ""})" } +
-            ", ${pluginFiles.size} plugin files, old plugin $hasOldPlugin"
+            ", ${pluginFiles.size} plugin files, old plugin $hasOldPlugin" +
+            (daemonFile?.let { ", daemon read back ${it.size} bytes sha256 ${it.sha256.take(16)}" }
+                ?: if (daemonUnreadable) ", daemon could not be read back" else "") +
+            (if (envText != null) ", nbt-aad.env ${envText.length} bytes" else if (envMissing) ", no nbt-aad.env" else "")
 }
 
 /** The daemon processes found by [RemoteScripts.procScan]: on this processor and on the one that runs Android Auto. */
@@ -112,6 +137,21 @@ object RemoteScripts {
         fi
     """.trimIndent() else "") + "\n" + """
         grep -a -o 'NBT-AAD-VERSION=v[0-9A-Za-z._+-]*' @AA@/nbt-aad 2>/dev/null
+    """.trimIndent()
+
+    /**
+     * The text of nbt-aad.env between two marker lines (`cat` is one of the few tools the login has). The extra empty
+     * line makes sure the end marker starts on a line of its own, whether or not the file ends with a line break.
+     */
+    private val ENV_PART = """
+        if [ -f @AA@/nbt-aad.env ]; then
+          echo "ENV-BEGIN"
+          cat @AA@/nbt-aad.env
+          echo ""
+          echo "ENV-END"
+        else
+          echo "ENV-NONE"
+        fi
     """.trimIndent()
 
     /** Makes sure nbt-aad.new can be run, with chmod in as many places as it may be. Returns 14: it cannot. */
@@ -265,25 +305,44 @@ object RemoteScripts {
         return rows.firstNotNullOfOrNull { it.aa } to rows.firstNotNullOfOrNull { it.pl }
     }
 
-    /** What is in the folders. Sizes are asked of `wc` when the head unit has it and left empty otherwise. */
-    fun status(aa: String, pl: String?): String = sh(statusPart(pl != null) + "\nexit 0", aa, pl ?: "")
+    /**
+     * What is in the folders. Sizes are asked of `wc` when the head unit has it and left empty otherwise. With
+     * [withEnv] the text of nbt-aad.env follows (see [parseStatus]).
+     */
+    fun status(aa: String, pl: String?, withEnv: Boolean = false): String =
+        sh(statusPart(pl != null) + (if (withEnv) "\n" + ENV_PART else "") + "\nexit 0", aa, pl ?: "")
 
     fun parseStatus(aa: String?, pl: String?, out: String): UnitStatus {
         val files = LinkedHashMap<String, FileState>()
         val plugin = LinkedHashMap<String, Long>()
         var oldPlugin = false
         var version: String? = null
+        var envBody: StringBuilder? = null   // the lines of nbt-aad.env while they are being read
+        var envText: String? = null          // set once the end marker has been seen: a cut-off file is not trusted
+        var envMissing = false
         for (raw in out.lines()) {
             val line = raw.trim()
+            if (envBody != null) {
+                // everything between the markers belongs to the file, whatever it looks like
+                if (line == "ENV-END") {
+                    envText = envBody.toString().trimEnd('\n').let { if (it.isEmpty()) it else it + "\n" }
+                    envBody = null
+                } else {
+                    envBody.append(raw).append('\n')
+                }
+                continue
+            }
             val t = line.split(Regex("\\s+"))
             when {
+                line == "ENV-BEGIN" -> envBody = StringBuilder()
+                line == "ENV-NONE" -> envMissing = true
                 line == "OLDPLUGIN" -> oldPlugin = true
                 t.size >= 3 && t[0] == "F" -> files[t[1]] = FileState(t.getOrNull(3)?.toLongOrNull() ?: -1L, t[2] == "x")
                 t.size >= 2 && t[0] == "L" -> plugin[t[1]] = t.getOrNull(2)?.toLongOrNull() ?: -1L
                 line.startsWith("NBT-AAD-VERSION=") -> version = line.removePrefix("NBT-AAD-VERSION=")
             }
         }
-        return UnitStatus(aa, pl, files, plugin, oldPlugin, version)
+        return UnitStatus(aa, pl, files, plugin, oldPlugin, version, envText, envMissing)
     }
 
     fun parseProc(out: String): ProcScan {

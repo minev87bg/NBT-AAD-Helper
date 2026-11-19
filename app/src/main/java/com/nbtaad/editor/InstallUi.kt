@@ -38,7 +38,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.nbtaad.editor.install.Described
 import com.nbtaad.editor.install.InstallController
+import com.nbtaad.editor.install.InstalledCheck
 import com.nbtaad.editor.install.Kind
 import com.nbtaad.editor.install.Level
 import com.nbtaad.editor.install.Names
@@ -50,6 +52,7 @@ import com.nbtaad.editor.install.RunKind
 import com.nbtaad.editor.install.RunState
 import com.nbtaad.editor.install.RunStatus
 import com.nbtaad.editor.install.SourceKind
+import com.nbtaad.editor.install.Tone
 import com.nbtaad.editor.install.UnitStatus
 
 // =========================================================================
@@ -321,7 +324,7 @@ fun InstallScreen(vm: MainViewModel) {
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                UnitCard(inst)
+                UnitCard(inst, onChange = { vm.chooseSettings() })
             }
         }
         if (inst.prepBusy || inst.prepMessage.isNotEmpty()) {
@@ -389,6 +392,8 @@ fun InstallScreen(vm: MainViewModel) {
     if (inst.askRevert) RevertDialog(inst)
     inst.job?.let { RunDialog(vm, inst, it) }
     inst.diagText?.let { DiagDialog(inst, it) }
+    // CHANGE may find an unfinished file of the last session and asks about it, as the choice page does
+    if (vm.askDraft) DraftDialog(vm)
 }
 
 @Composable
@@ -396,20 +401,24 @@ private fun StatusDot(color: Color) {
     Box(Modifier.size(10.dp).clip(CircleShape).background(color))
 }
 
+/**
+ * What matters before deciding between installing something and changing a setting: which version is on the head unit,
+ * whether it is an official release, and which settings nbt-aad.env applies (CHANGE goes to them).
+ */
 @Composable
-private fun UnitCard(inst: InstallController) {
+private fun UnitCard(inst: InstallController, onChange: () -> Unit) {
     OutlinedCard(Modifier.fillMaxWidth().padding(top = 14.dp)) {
         Column(Modifier.padding(12.dp)) {
-            Text("On the head unit now", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            Text("Current status", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(4.dp))
             val u = inst.unit
             when {
+                inst.unitError -> Text(inst.unitMessage, fontSize = 12.sp, color = Red)
+                u != null -> UnitBody(inst, u, onChange)
                 inst.unitBusy -> {
                     Text(inst.unitMessage.ifEmpty { "Looking at the head unit…" }, fontSize = 12.sp)
                     LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 6.dp))
                 }
-                inst.unitError -> Text(inst.unitMessage, fontSize = 12.sp, color = Red)
-                u != null -> UnitLines(u)
                 else -> Text("Not read yet.", fontSize = 12.sp)
             }
             Row {
@@ -423,37 +432,85 @@ private fun UnitCard(inst: InstallController) {
 }
 
 @Composable
-private fun UnitLines(u: UnitStatus) {
-    val d = u.files[Names.DAEMON]
-    Text("Folder: ${u.aaDir}", fontSize = 12.sp, fontFamily = FontFamily.Monospace)
-    Text(
-        if (d == null) "Daemon: nbt-aad not found in that folder"
-        else "Daemon: nbt-aad" + (if (d.size >= 0) ", ${ReleaseLogic.mb(d.size)}" else "") +
-            (u.version?.let { ", $it" } ?: "") + (if (d.executable) "" else ", NOT executable"),
-        fontSize = 12.sp,
-        color = if (d != null && !d.executable) Red else Color.Unspecified,
-    )
-    if (u.daemonBroken) {
+private fun UnitBody(inst: InstallController, u: UnitStatus, onChange: () -> Unit) {
+    val soft = MaterialTheme.colorScheme.onSurfaceVariant
+
+    // ---- the installed version, and whether it is an official release ----
+    Text("Installed version", fontSize = 11.sp, color = soft)
+    if (!u.hasDaemon) {
+        Text("nbt-aad was not found in ${u.aaDir}", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Red)
+    } else {
         Text(
-            "Android Auto cannot start with this nbt-aad: the head unit cannot run it (an install that stopped halfway?)." +
-                if (u.hasPreviousDaemon) {
-                    " The previous daemon is kept as nbt-aad.old: use \"Go back to the previous version\" and tick only the daemon."
-                } else {
-                    " Install a release to repair it."
-                },
-            fontSize = 12.sp,
-            color = Red,
+            u.installedVersion ?: "unknown",
+            fontSize = 18.sp,
+            fontWeight = FontWeight.SemiBold,
+            fontFamily = FontFamily.Monospace,
         )
+        if (u.daemonBroken) {
+            Text(
+                "Android Auto cannot start with this nbt-aad: the head unit cannot run it (an install that stopped halfway?)." +
+                    if (u.hasPreviousDaemon) {
+                        " The previous daemon is kept as nbt-aad.old: use \"Go back to the previous version\" and tick only the daemon."
+                    } else {
+                        " Install a release to repair it."
+                    },
+                fontSize = 12.sp,
+                color = Red,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        }
+        val verdict = inst.verdict()
+        when {
+            inst.checkingDaemon -> ProgressLine("Checking the installed file…")
+            inst.releasesBusy && inst.releases == null -> ProgressLine("Comparing with Sq00ky's Releases page…")
+            verdict != null -> VerdictLines(InstalledCheck.describe(verdict, u.installedVersion))
+        }
     }
-    Text(
-        if (u.pluginDir != null) "Plugin: ${u.pluginFiles.size} file${if (u.pluginFiles.size == 1) "" else "s"} in its folder"
-        else "Plugin folder: not found",
-        fontSize = 12.sp,
-    )
-    Text(
-        "Previous version kept: daemon ${if (u.hasPreviousDaemon) "yes" else "no"}, plugin ${if (u.hasOldPlugin) "yes" else "no"}",
-        fontSize = 12.sp,
-    )
+    if (u.pluginDir == null) {
+        Text("The plugin folder was not found on the head unit.", fontSize = 12.sp, color = Amber, modifier = Modifier.padding(top = 4.dp))
+    }
+
+    // ---- the settings that nbt-aad.env applies ----
+    Spacer(Modifier.height(12.dp))
+    val applied = inst.appliedOptions()
+    Text("Settings applied (nbt-aad.env)", fontSize = 11.sp, color = soft)
+    when {
+        u.envText != null && applied.isNotEmpty() -> for (o in applied) {
+            Row(Modifier.fillMaxWidth().padding(top = 3.dp), verticalAlignment = Alignment.Top) {
+                Text(o.key, fontSize = 12.sp, fontFamily = FontFamily.Monospace, modifier = Modifier.weight(1f))
+                Spacer(Modifier.width(8.dp))
+                Text(o.shown, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+            }
+        }
+        u.envText != null -> Text("Nothing is switched on: every setting runs at its default.", fontSize = 12.sp)
+        u.envMissing -> Text("There is no nbt-aad.env: every setting runs at its default.", fontSize = 12.sp)
+        else -> Text("nbt-aad.env could not be read.", fontSize = 12.sp, color = soft)
+    }
+    OutlinedButton(
+        onClick = onChange,
+        enabled = inst.job?.status != RunStatus.RUNNING,
+        modifier = Modifier.padding(top = 6.dp),
+    ) { Text("CHANGE", fontSize = 12.sp) }
+}
+
+@Composable
+private fun ProgressLine(text: String) {
+    Text(text, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+    LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 4.dp))
+}
+
+/** The verdict on the installed file: a coloured headline and a sentence or two under it. */
+@Composable
+private fun VerdictLines(d: Described) {
+    val color = when (d.tone) {
+        Tone.GOOD -> Green
+        Tone.WARN -> Amber
+        Tone.PLAIN -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Text(d.headline, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = color, modifier = Modifier.padding(top = 6.dp))
+    if (d.detail.isNotEmpty()) {
+        Text(d.detail, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
 }
 
 @Composable
@@ -482,11 +539,12 @@ private fun ReleaseRow(inst: InstallController, r: ReleaseInfo) {
                     }
                 }
                 Text(
-                    "${ReleaseLogic.day(r.published)}, ${ReleaseLogic.mb(ReleaseLogic.downloadSize(r))}" +
-                        (if (r.title.isNotBlank() && r.title != r.tag) ", ${r.title}" else ""),
+                    "${TimeText.full(r.published)}  ·  ${ReleaseLogic.mb(ReleaseLogic.downloadSize(r))}",
                     fontSize = 12.sp,
-                    maxLines = 2,
                 )
+                if (r.title.isNotBlank() && r.title != r.tag) {
+                    Text(r.title, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
+                }
                 Text(
                     ReleaseLogic.wanted(r).joinToString(", ") { it.name },
                     fontSize = 11.sp,

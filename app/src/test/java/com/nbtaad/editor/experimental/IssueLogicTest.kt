@@ -134,11 +134,16 @@ class IssueLogicTest {
                 "Try NBT_FORCE_X=1. Details at https://example.com/doc and a build https://github.com/user-attachments/files/5/fix.zip", "",
             ),
         )
-        val d = Digest.of(t, comments)
-        assertTrue(d.lines[0].startsWith("Issue #10, open, opened by kedzior12 on 2026-10-28. 1 comment from 2 people"))
+        // times are on the clock of the phone (here Sofia, two hours ahead of GitHub's UTC), with how long ago they were
+        val d = Digest.of(t, comments, java.time.ZoneId.of("Europe/Sofia"), java.time.Instant.parse("2026-10-31T09:00:00Z"))
+        assertEquals(
+            "Issue #10, open, opened by kedzior12 on 2026-10-28 12:00. 1 comment from 2 people, " +
+                "last activity 2026-10-29 10:00  ·  2 d ago.",
+            d.lines[0],
+        )
         assertTrue(d.lines.any { it.startsWith("Labels: bug, help wanted") })
         assertTrue(d.lines.any { it.startsWith("It says: My car only connects once.") })
-        assertTrue(d.lines.any { it.startsWith("Latest from helper (2026-10-30)") })
+        assertTrue(d.lines.any { it.startsWith("Latest from helper (2026-10-30 11:00  ·  1 d ago): ") })
         assertTrue(d.lines.any { it == "Settings mentioned: NBT_FORCE_X." })
         assertTrue(d.lines.any { it.startsWith("Files shared: log.zip, fix.zip") })
         // files first, then the pages

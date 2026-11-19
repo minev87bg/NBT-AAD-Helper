@@ -1,6 +1,8 @@
 package com.nbtaad.editor.install
 
+import com.nbtaad.editor.log.AppLog
 import com.nbtaad.editor.net.SshSession
+import com.nbtaad.editor.update.UpdateLogic
 import java.io.IOException
 
 enum class Level { INFO, OK, WARN, ERROR }
@@ -82,12 +84,43 @@ object HeadUnit {
         return Probe(Layout(aa, pl), RemoteScripts.parseProc(text))
     }
 
-    private fun readStatus(ssh: SshSession, lay: Layout): UnitStatus =
-        RemoteScripts.parseStatus(lay.aa, lay.plugin, ssh.exec(RemoteScripts.status(lay.aa, lay.plugin), timeoutMs = 60_000).text)
+    private fun readStatus(ssh: SshSession, lay: Layout, withEnv: Boolean = false): UnitStatus =
+        RemoteScripts.parseStatus(
+            lay.aa, lay.plugin,
+            ssh.exec(RemoteScripts.status(lay.aa, lay.plugin, withEnv), timeoutMs = 60_000).text,
+        )
 
-    /** What is on the head unit now (read only). */
-    fun status(host: String): UnitStatus =
-        SshSession(host).use { ssh -> readStatus(ssh, locate(ssh)) }
+    /**
+     * The installed nbt-aad read back with `cat` and looked at here (size, SHA-256, the version named inside it), or
+     * null when that did not work. The head unit's own tools cannot be counted on for this: its login has no `wc`, and
+     * its `grep` may not know the options the version search needs. Whatever goes wrong here must not spoil the rest of
+     * the status, so it is logged and left at that.
+     */
+    private fun readDaemon(ssh: SshSession, lay: Layout): DaemonFile? = try {
+        val r = ssh.exec("cat ${lay.aa}/${Names.DAEMON}", timeoutMs = 120_000)
+        if (r.exit != 0 || r.out.isEmpty()) {
+            AppLog.w("Unit", "Reading nbt-aad back failed: exit ${r.exit}, ${r.out.size} bytes${r.err.trim().takeIf { it.isNotEmpty() }?.let { ", $it" } ?: ""}")
+            null
+        } else {
+            DaemonFile(r.out.size.toLong(), UpdateLogic.sha256Hex(r.out), BuildPackage.findVersion(r.out))
+        }
+    } catch (e: Exception) {
+        AppLog.w("Unit", "Reading nbt-aad back failed: ${e.javaClass.simpleName}: ${e.message}")
+        null
+    }
+
+    /**
+     * What is on the head unit now (read only): the folders and files, the text of nbt-aad.env, and the installed daemon
+     * read back and hashed. The last step takes a few seconds, so [early] is given what is known before it, to be shown
+     * while it goes on.
+     */
+    fun status(host: String, early: (UnitStatus) -> Unit = {}): UnitStatus =
+        SshSession(host).use { ssh ->
+            val lay = locate(ssh)
+            val first = readStatus(ssh, lay, withEnv = true)
+            early(first)
+            if (first.hasDaemon) first.withDaemonFile(readDaemon(ssh, lay)) else first
+        }
 
     /** The commands and folders the SSH login has, as text for the person to read or send on. */
     fun diagnose(host: String): String =

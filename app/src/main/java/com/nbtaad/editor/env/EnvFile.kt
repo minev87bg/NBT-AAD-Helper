@@ -44,6 +44,14 @@ class EnvDoc(private val lines: MutableList<EnvLine>) {
         lines.filterIsInstance<EnvLine.Entry>().lastOrNull { it.key == key }?.value
 
     /**
+     * The settings that are switched on, in file order, each with the value the daemon would get. A setting with an
+     * empty value counts as off (the settings page treats it the same way), and one that appears twice counts once
+     * with its last value, as [get] has it.
+     */
+    fun active(): List<Pair<String, String>> =
+        keys().mapNotNull { k -> get(k)?.takeIf { it.isNotBlank() }?.let { k to it } }
+
+    /**
      * [value] == null switches the setting off (the line is commented out, not deleted).
      * A non-null value switches it on: an active line is updated, otherwise a commented-out line with the
      * same value is switched on, otherwise a new line is added after the setting's other lines.

@@ -1,5 +1,6 @@
 package com.nbtaad.editor.experimental
 
+import com.nbtaad.editor.TimeText
 import com.nbtaad.editor.install.Names
 
 /** One issue or pull request of the project, as GitHub lists them (both come from the same list). */
@@ -358,7 +359,12 @@ object Mentions {
 
 /** The digest of a page. */
 object Digest {
-    fun of(t: Topic, comments: List<Comment>): Summary {
+    fun of(
+        t: Topic,
+        comments: List<Comment>,
+        zone: java.time.ZoneId = java.time.ZoneId.systemDefault(),
+        now: java.time.Instant = java.time.Instant.now(),
+    ): Summary {
         val lines = ArrayList<String>()
         val kind = if (t.isPr) "Pull request" else "Issue"
         val state = when {
@@ -367,14 +373,16 @@ object Digest {
             else -> "closed"
         }
         val people = (listOf(t.author) + comments.map { it.author }).filter { it.isNotBlank() }.distinct()
-        lines += "$kind #${t.number}, $state, opened by ${t.author.ifBlank { "someone" }} on ${t.created.take(10)}. " +
+        lines += "$kind #${t.number}, $state, opened by ${t.author.ifBlank { "someone" }} on ${TimeText.stamp(t.created, zone)}. " +
             "${comments.size} comment${if (comments.size == 1) "" else "s"} from ${people.size} " +
-            "${if (people.size == 1) "person" else "people"}, last activity ${t.updated.take(10)}."
+            "${if (people.size == 1) "person" else "people"}, last activity ${TimeText.full(t.updated, zone, now)}."
         if (t.labels.isNotEmpty()) lines += "Labels: ${t.labels.joinToString(", ")}."
         val gist = PageText.gist(t.body)
         if (gist.isNotEmpty()) lines += "It says: $gist"
         val last = comments.lastOrNull { PageText.gist(it.body).isNotEmpty() }
-        if (last != null) lines += "Latest from ${last.author} (${last.created.take(10)}): ${PageText.gist(last.body, 1, 220)}"
+        if (last != null) {
+            lines += "Latest from ${last.author} (${TimeText.full(last.created, zone, now)}): ${PageText.gist(last.body, 1, 220)}"
+        }
         val all = listOf(t.body) + comments.map { it.body }
         val settings = Mentions.settings(all)
         if (settings.isNotEmpty()) lines += "Settings mentioned: ${settings.take(8).joinToString(", ")}."

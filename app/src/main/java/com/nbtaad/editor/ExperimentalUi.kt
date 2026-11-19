@@ -66,7 +66,6 @@ import com.nbtaad.editor.experimental.FileLink
 import com.nbtaad.editor.experimental.Mentions
 import com.nbtaad.editor.experimental.Markdown
 import com.nbtaad.editor.experimental.Topic
-import com.nbtaad.editor.install.ReleaseLogic
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -240,9 +239,13 @@ private fun TopicRow(exp: ExperimentalController, t: Topic) {
                     buildString {
                         append(t.author)
                         append("  ·  ${t.comments} comment${if (t.comments == 1) "" else "s"}")
-                        append("  ·  ${ReleaseLogic.day(t.updated)}")
                         if (t.merged) append("  ·  merged") else if (t.draft) append("  ·  draft")
                     },
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    "Updated ${TimeText.full(t.updated)}",
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -308,7 +311,7 @@ private fun TopicDetail(vm: MainViewModel, t: Topic) {
                 Spacer(Modifier.height(6.dp))
                 Text("#${t.number}  ${t.title}", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
                 Text(
-                    "${t.author}  ·  opened ${ReleaseLogic.day(t.created)}  ·  updated ${ReleaseLogic.day(t.updated)}",
+                    "Last activity ${TimeText.full(t.updated)}",
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -369,6 +372,13 @@ private fun TopicDetail(vm: MainViewModel, t: Topic) {
                     if (flash == 0) Modifier.background(ExperimentalAmber.copy(alpha = 0.14f), RoundedCornerShape(8.dp)) else Modifier
                 ),
             ) {
+                Text(
+                    "${t.author}  ·  opened ${TimeText.full(t.created)}",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(6.dp))
                 if (body.isEmpty()) {
                     Text("(no text)", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 } else {
@@ -376,7 +386,7 @@ private fun TopicDetail(vm: MainViewModel, t: Topic) {
                 }
                 if (bodyPics.isNotEmpty()) {
                     PictureGrid(bodyPics, Modifier.padding(top = 10.dp)) { i ->
-                        exp.openGallery("First post  ·  ${t.author}", bodyPics, i)
+                        exp.openGallery("First post  ·  ${t.author}  ·  ${TimeText.stamp(t.created)}", bodyPics, i)
                     }
                 }
             }
@@ -640,7 +650,7 @@ private fun CommentCard(exp: ExperimentalController, c: Comment, flash: Boolean,
     ) {
         Column(Modifier.padding(12.dp)) {
             Text(
-                "${c.author}  ·  ${ReleaseLogic.day(c.created)}",
+                "${c.author}  ·  ${TimeText.full(c.created)}",
                 fontSize = 12.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -653,7 +663,7 @@ private fun CommentCard(exp: ExperimentalController, c: Comment, flash: Boolean,
             }
             if (pics.isNotEmpty()) {
                 PictureGrid(pics, Modifier.padding(top = 8.dp)) { i ->
-                    exp.openGallery("Comment  ·  ${c.author}  ·  ${ReleaseLogic.day(c.created)}", pics, i)
+                    exp.openGallery("Comment  ·  ${c.author}  ·  ${TimeText.stamp(c.created)}", pics, i)
                 }
             }
             if (short.second) {

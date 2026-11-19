@@ -96,6 +96,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** The "Install / update NBT Android Auto" screen: releases, files, what is on the head unit, install and go back. */
     val inst = InstallController(
         ctx, viewModelScope, host = { detect.hu }, rescan = { rescanForHost() }, problem = { scanProblem },
+        catalog = { catalog },
     )
 
     /** The Experimental page: issues and pull requests of the project, and the files people share in them. */
