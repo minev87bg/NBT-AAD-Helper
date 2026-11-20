@@ -64,7 +64,7 @@ fun ContributeScreen(vm: MainViewModel) {
                 )
             }
         }
-        item(key = "__logs") { LogsCard(c) }
+        item(key = "__logs") { LogsCard(c, vm) }
         item(key = "__target") { TargetCard(c) }
         item(key = "__pack") { PackCard(c) }
         item(key = "__end") { Spacer(Modifier.height(32.dp)) }
@@ -73,7 +73,7 @@ fun ContributeScreen(vm: MainViewModel) {
 }
 
 @Composable
-internal fun LogsCard(c: ContributeController) {
+internal fun LogsCard(c: ContributeController, vm: MainViewModel? = null) {
     val soft = MaterialTheme.colorScheme.onSurfaceVariant
     OutlinedCard(Modifier.fillMaxWidth().padding(top = 14.dp)) {
         Column(Modifier.padding(12.dp)) {
@@ -95,12 +95,68 @@ internal fun LogsCard(c: ContributeController) {
                 )
                 else -> for (l in logs) LogRow(c, l)
             }
+            // the phone was pulled away from the car's WiFi: the way back is next to the message that says so
+            if (vm != null && c.lookError && vm.dongle != null) {
+                OutlinedButton(onClick = { vm.openConnectAgain() }, modifier = Modifier.padding(top = 4.dp)) {
+                    Text("CONNECT AGAIN", fontSize = 12.sp)
+                }
+            }
             // the other things that help, next to the logs
             CheckRow("nbt-aad.env (your settings)", c.withEnv) { c.setEnv(it) }
             CheckRow("This app's own log", c.withAppLog) { c.setAppLog(it) }
-            TextButton(onClick = { c.look() }, enabled = !c.working) { Text("LOOK AGAIN", fontSize = 12.sp) }
+            Row {
+                TextButton(onClick = { c.look() }, enabled = !c.working) { Text("LOOK AGAIN", fontSize = 12.sp) }
+                TextButton(onClick = { c.askClear = true }, enabled = !c.working && !logs.isNullOrEmpty()) {
+                    Text("CLEAR LOGS", fontSize = 12.sp)
+                }
+            }
+            // what clearing said, under the button that did it
+            if (c.clearing || c.clearMessage.isNotEmpty()) {
+                Text(c.clearMessage, fontSize = 12.sp, color = if (c.clearError) Red else if (c.clearing) soft else Green)
+                if (c.clearing) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 6.dp))
+                if (!c.clearing && !c.clearError && vm != null) {
+                    Text(
+                        "A restart of the head unit is recommended: the daemon then starts new logs.",
+                        fontSize = 11.sp,
+                        color = soft,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                    ResetButton(vm, Modifier.padding(top = 4.dp))
+                }
+            }
         }
     }
+    if (c.askClear) ClearLogsDialog(c)
+}
+
+@Composable
+private fun ClearLogsDialog(c: ContributeController) {
+    val files = c.logs.orEmpty()
+    AlertDialog(
+        onDismissRequest = { c.askClear = false },
+        title = { Text("Clear the logs?", fontSize = 18.sp) },
+        text = {
+            Column {
+                Text("This deletes these files on the head unit, in its memory and on the USB stick:", fontSize = 13.sp)
+                Spacer(Modifier.height(6.dp))
+                for (l in files) {
+                    Text(
+                        l.name + (if (l.place.isNotEmpty()) "  ·  " + l.place else ""),
+                        fontSize = 12.sp,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "They cannot be brought back. Pack the ones you still need first. While Android Auto runs, restart the " +
+                        "head unit afterwards, so that it starts new logs.",
+                    fontSize = 12.sp,
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = { c.clearLogs() }) { Text("DELETE") } },
+        dismissButton = { TextButton(onClick = { c.askClear = false }) { Text("CANCEL") } },
+    )
 }
 
 @Composable

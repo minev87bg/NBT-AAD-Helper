@@ -143,6 +143,25 @@ object HeadUnit {
 
     private val SAFE_PATH = Regex("^/[A-Za-z0-9._/@+-]+$")
 
+    /** Deletes the daemon's log files on the head unit. Returns what could not be deleted, as "name: why" (empty: all gone). */
+    fun clearLogs(host: String, logs: List<HeadLog>): List<String> =
+        SshSession(host).use { ssh ->
+            val problems = ArrayList<String>()
+            val safe = ArrayList<String>()
+            for (l in logs) {
+                if (SAFE_PATH.matches(l.path)) safe += l.path
+                else problems += "${l.name}: the file name has characters the app will not pass on"
+            }
+            if (safe.isNotEmpty()) {
+                val answer = ssh.exec(RemoteScripts.removeFiles(safe), timeoutMs = 60_000).text.lines().map { it.trim() }
+                for (line in answer) {
+                    if (line.startsWith("FAIL ")) problems += "${line.removePrefix("FAIL ").substringAfterLast('/')}: the head unit would not delete it"
+                }
+                AppLog.i("Contribute", "Deleted logs: ${answer.count { it.startsWith("OK ") }}, already gone: ${answer.count { it.startsWith("GONE ") }}, failed: ${answer.count { it.startsWith("FAIL ") }}")
+            }
+            problems
+        }
+
     /**
      * Reads the chosen logs, and with [withEnv] nbt-aad.env, one after the other over one connection (`cat` is what the
      * head unit has; it is slow, about 30 KB/s on the first car this was tried on, so [onProgress] says which file and how

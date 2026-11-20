@@ -78,7 +78,13 @@ class ContributeController(
 
     @Volatile private var cancel = false
 
-    val working: Boolean get() = looking || packing
+    // clearing the logs on the head unit
+    var askClear by mutableStateOf(false)
+    var clearing by mutableStateOf(false); private set
+    var clearMessage by mutableStateOf(""); private set
+    var clearError by mutableStateOf(false); private set
+
+    val working: Boolean get() = looking || packing || clearing
 
     /** The page to attach the zip on: the chosen issue or pull request (scrolled to the comment box), else a new issue. */
     fun pageUrl(): String =
@@ -121,6 +127,39 @@ class ContributeController(
             } finally {
                 looking = false
             }
+        }
+    }
+
+    /** Deletes every log file that is listed (in memory and on the stick), then looks at the head unit again. */
+    fun clearLogs() {
+        askClear = false
+        if (working) return
+        val files = logs.orEmpty()
+        if (files.isEmpty()) return
+        clearing = true
+        clearError = false
+        clearMessage = "Deleting the logs…"
+        scope.launch(Dispatchers.IO) {
+            try {
+                NetworkBinder.bindToLocalNetwork(ctx)
+                val problems = runOnHeadUnit(host, rescan, onRescan = { clearMessage = lookingNote() }, whyNot = problem) {
+                    HeadUnit.clearLogs(it, files)
+                }
+                clearError = problems.isNotEmpty()
+                clearMessage = if (problems.isEmpty()) {
+                    "The logs were deleted."
+                } else {
+                    "Not everything was deleted: " + problems.joinToString("; ")
+                }
+                AppLog.i("Contribute", "Clear logs: ${files.size} files, problems: ${problems.ifEmpty { listOf("none") }}")
+            } catch (e: Exception) {
+                AppLog.e("Contribute", "Clearing the logs failed", e)
+                clearError = true
+                clearMessage = friendlyError(e)
+            } finally {
+                clearing = false
+            }
+            look()
         }
     }
 

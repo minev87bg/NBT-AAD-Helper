@@ -28,6 +28,11 @@ import com.nbtaad.editor.log.exportName
 import com.nbtaad.editor.log.saveTo
 import com.nbtaad.editor.log.start
 import com.nbtaad.editor.net.CarDetector
+import com.nbtaad.editor.net.CarNet
+import com.nbtaad.editor.net.CarNetLogic
+import com.nbtaad.editor.net.CarWifi
+import com.nbtaad.editor.net.DongleWifi
+import com.nbtaad.editor.net.WifiNames
 import com.nbtaad.editor.net.CatalogSync
 import com.nbtaad.editor.net.DetectResult
 import com.nbtaad.editor.net.EnvRemote
@@ -167,6 +172,29 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     var askDraft by mutableStateOf(false)
     var manualDialog by mutableStateOf(false)
     private var pollJob: Job? = null
+
+    // ---------------- the car's network and the dongle (this session only) ----------------
+
+    /** The WiFi the car answered on at the last good DETECT CAR; null before one, and while DETECT CAR looks again. */
+    var carNet by mutableStateOf<CarNet?>(null); private set
+
+    /** The dongle's WiFi name and password as the person gave them. In memory only: gone when the app closes. */
+    var dongle by mutableStateOf<DongleWifi?>(null); private set
+    private var dongleDeclined = false
+
+    /** The question "is this your WiFi dongle?" (the name and the password). */
+    var askDongle by mutableStateOf(false)
+
+    /** The window of CONNECT AGAIN: Bluetooth off first, then the dongle's WiFi. */
+    var connectDialog by mutableStateOf(false)
+
+    /** Brings the phone back to the dongle's WiFi with the name and password the person gave. */
+    val carWifi = CarWifi(ctx)
+
+    override fun onCleared() {
+        carWifi.release()
+        super.onCleared()
+    }
 
     // ---------------- screen 2: options ----------------
     var optBusy by mutableStateOf(false)
@@ -381,6 +409,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         feedbackError = false
         feedback = "Starting…"
         detect = DetectState()
+        carNet = null // the network is marked again by the new look, if the car answers
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 NetworkBinder.bindToLocalNetwork(ctx)
@@ -409,6 +438,72 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             r.huIp != null -> "Car found, but SSH (port 22) is closed. Use the reset button next to the red dot."
             else -> "Car found, but no head unit with SSH was found. Use the reset button or set the IPs manually."
         }
+        if (r.zgwIp != null && r.huIp != null && r.sshOpen) markCarNetwork(r.huIp)
+    }
+
+    /**
+     * The car answered on the phone's WiFi right now: that is the network that works with the car. Remembered for the
+     * session, so CONNECT AGAIN can bring the phone back to it when Android Auto has pulled it away.
+     */
+    private fun markCarNetwork(huIp: String) {
+        val subnet = CarNetLogic.subnetOf(huIp)
+        val nets = CarDetector.localNetworks()
+        val net = nets.firstOrNull { CarNetLogic.onSubnet(it.ip, subnet) } ?: return
+        if (!net.name.lowercase().startsWith("wlan")) {
+            carNet = null // a cable (Ethernet): there is no WiFi to come back to
+            return
+        }
+        val ssid = WifiNames.currentSsid(ctx)
+        carNet = CarNet(net.name, net.ip, CarNetLogic.subnetOf(net.ip), ssid)
+        AppLog.i("Wifi", "The car answers on ${net.name} ${net.ip}" + (ssid?.let { " (WiFi \"$it\")" } ?: " (the WiFi name is not known)"))
+        // another WiFi than the one the person described: the earlier answer is not about this one
+        val known = dongle
+        if (known != null && ssid != null && !ssid.equals(known.ssid, ignoreCase = true)) {
+            dongle = null
+            dongleDeclined = false
+        }
+    }
+
+    /** On entering the pages that read logs: asks once whether the WiFi the car answered on is the dongle. */
+    private fun maybeAskDongle() {
+        if (carNet == null || dongle != null || dongleDeclined) return
+        askDongle = true
+    }
+
+    /** The name of the WiFi the phone is on, but only while it is still on the car's network (else it would be the wrong one). */
+    fun readCarSsid(): String? {
+        val n = carNet ?: return null
+        if (CarDetector.localNetworks().none { CarNetLogic.onSubnet(it.ip, n.subnet) }) return null
+        return WifiNames.currentSsid(ctx)
+    }
+
+    fun saveDongle(ssid: String, password: String) {
+        val name = ssid.trim()
+        if (name.isEmpty()) return
+        dongle = DongleWifi(name, password)
+        dongleDeclined = false
+        askDongle = false
+        AppLog.i("Wifi", "The dongle's WiFi is \"$name\" (password ${if (password.isEmpty()) "none" else "given"})")
+    }
+
+    fun declineDongle() {
+        dongleDeclined = true
+        askDongle = false
+        AppLog.i("Wifi", "The person said this is not the dongle's WiFi, or not now")
+    }
+
+    /** CONNECT AGAIN: the window that asks for Bluetooth off and then joins the dongle's WiFi. */
+    fun openConnectAgain() {
+        if (carWifi.join != com.nbtaad.editor.net.WifiJoin.CONNECTED) carWifi.release()
+        connectDialog = true
+    }
+
+    fun connectAgain() {
+        dongle?.let { carWifi.connect(it) }
+    }
+
+    fun closeConnectAgain() {
+        connectDialog = false
     }
 
     fun setManual(zgwText: String, huText: String) {
@@ -613,6 +708,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         fromWizard = false
         wizard.start(t)
         screen = Screen.WIZARD
+        maybeAskDongle()
     }
 
     /** MANUAL: the page where the files are ticked by hand, for the page [t]. */
@@ -620,6 +716,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         wizard.askMode = false
         contribute.open(t)
         screen = Screen.CONTRIBUTE
+        maybeAskDongle()
     }
 
     /** Leaves the manual page for the page it was started from. */

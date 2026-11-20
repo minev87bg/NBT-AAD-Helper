@@ -3,6 +3,7 @@ package com.nbtaad.editor.net
 import com.nbtaad.editor.log.AppLog
 import android.content.Context
 import android.net.ConnectivityManager
+import android.net.Network
 import android.net.NetworkCapabilities
 import java.net.DatagramPacket
 import java.net.DatagramSocket
@@ -55,6 +56,30 @@ data class DetectResult(
 )
 
 object NetworkBinder {
+    /** The WiFi the app itself asked Android for (see [CarWifi]): when there is one, the app's traffic is tied to it. */
+    @Volatile
+    private var held: Network? = null
+
+    /** The app was given a network of its own: tie the app to it. */
+    fun hold(ctx: Context, network: Network) {
+        held = network
+        try {
+            (ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager).bindProcessToNetwork(network)
+        } catch (_: Exception) {
+        }
+    }
+
+    /** That network is gone: forget it, and let go of the tie if it was the one the app was tied to. */
+    fun drop(ctx: Context, network: Network) {
+        if (held == network) dropAll(ctx)
+    }
+
+    fun dropAll(ctx: Context) {
+        if (held == null) return
+        held = null
+        unbind(ctx)
+    }
+
     /**
      * A WiFi dongle without internet makes Android route app traffic over mobile data.
      * Binding the process to the WiFi/Ethernet network avoids that. When the phone itself is the
@@ -66,6 +91,15 @@ object NetworkBinder {
     fun bindToLocalNetwork(ctx: Context) {
         try {
             val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            // the WiFi the app asked for itself (Connect again) comes first, as long as it is still there
+            val mine = held
+            if (mine != null) {
+                if (cm.getNetworkCapabilities(mine) != null) {
+                    cm.bindProcessToNetwork(mine)
+                    return
+                }
+                held = null
+            }
             @Suppress("DEPRECATION")
             val pick = cm.allNetworks.firstOrNull { n ->
                 val c = cm.getNetworkCapabilities(n)

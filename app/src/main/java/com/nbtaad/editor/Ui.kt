@@ -59,6 +59,8 @@ fun App(vm: MainViewModel) {
             ThemeToggle(vm, Modifier.align(Alignment.TopEnd).padding(4.dp))
         }
         if (vm.showLog) AppLogDialog(vm)
+        if (vm.askDongle) DongleDialog(vm)
+        if (vm.connectDialog) ConnectAgainDialog(vm)
     }
 }
 

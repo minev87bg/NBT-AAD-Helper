@@ -4,6 +4,12 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <!-- CONNECT AGAIN asks Android for the dongle's WiFi by name and password -->
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
+    <!-- only to read the name of the WiFi the car answered on (Android hides WiFi names without it); the person can type it instead -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <!-- the live check whether Bluetooth is on (older Androids want this, newer ones need nothing to read the state) -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <!-- lets the app hand its own newer version (downloaded from the project's GitHub releases) to the installer -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 

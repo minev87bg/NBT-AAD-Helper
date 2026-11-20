@@ -529,6 +529,23 @@ object RemoteScripts {
         """,
     )
 
+    /**
+     * Deletes the given files (the daemon's logs; the paths were checked to be plain) and says for each what happened:
+     * `OK path`, `GONE path` (it was not there any more) or `FAIL path`. Other lines of the answer are ignored.
+     */
+    fun removeFiles(paths: List<String>): String = sh(
+        """
+        for f in ${paths.joinToString(" ")}; do
+          if [ -e ¤f ]; then
+            if rm -f ¤f 2>&1; then echo "OK ¤f"; else echo "FAIL ¤f"; fi
+          else
+            echo "GONE ¤f"
+          fi
+        done
+        exit 0
+        """,
+    )
+
     /** Which commands and folders the SSH login of the head unit has: shown to the person, who can send it on. */
     fun diagnose(): String = sh(
         """

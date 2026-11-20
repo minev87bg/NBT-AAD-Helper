@@ -271,26 +271,47 @@ private fun ReturnStep(vm: MainViewModel) {
     val soft = MaterialTheme.colorScheme.onSurfaceVariant
     var showInfo by remember { mutableStateOf(false) }
     var noList by remember { mutableStateOf(false) }
+    val dongle = vm.dongle
     StepTitle("Back to the dongle's WiFi")
     Spacer(Modifier.height(6.dp))
     Text(
-        "Switch the phone to the WiFi you use to set up the head unit. Android Auto keeps running; the app waits for the head unit.",
+        if (dongle != null) {
+            "Press CONNECT AGAIN: the app asks you to turn Bluetooth off, then joins ${dongle.ssid}. Android Auto keeps " +
+                "running; the app waits for the head unit."
+        } else {
+            "Switch the phone to the WiFi you use to set up the head unit. Android Auto keeps running; the app waits for the head unit."
+        },
         fontSize = 13.sp,
     )
     Spacer(Modifier.height(12.dp))
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Button(onClick = { noList = !WifiPanel.open(ctx) }, modifier = Modifier.weight(1f)) { Text("CHOOSE WIFI") }
+        if (dongle != null) {
+            Button(onClick = { vm.openConnectAgain() }, modifier = Modifier.weight(1f)) { Text("CONNECT AGAIN") }
+        } else {
+            Button(onClick = { noList = !WifiPanel.open(ctx) }, modifier = Modifier.weight(1f)) { Text("CHOOSE WIFI") }
+        }
         Spacer(Modifier.width(10.dp))
         Box {
             InfoDot { showInfo = true }
             if (showInfo) {
                 InfoBalloon(
-                    "Choose WiFi",
-                    "Opens Android's own list of WiFi networks over this app. Tap the dongle's network. The app stays " +
-                        "where it is and notices the head unit by itself.",
+                    if (dongle != null) "Connect again" else "Choose WiFi",
+                    if (dongle != null) {
+                        "Joins ${dongle.ssid} by itself, with the name and password you gave. Bluetooth has to be off first, " +
+                            "or Android Auto pulls the phone away again; the window checks that live. The app stays where " +
+                            "it is and notices the head unit by itself."
+                    } else {
+                        "Opens Android's own list of WiFi networks over this app. Tap the dongle's network. The app stays " +
+                            "where it is and notices the head unit by itself."
+                    },
                     mono = false,
                 ) { showInfo = false }
             }
+        }
+    }
+    if (dongle != null) {
+        TextButton(onClick = { noList = !WifiPanel.open(ctx) }, contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)) {
+            Text("or pick it in Android's WiFi list", fontSize = 11.sp)
         }
     }
     if (noList) {
@@ -330,7 +351,7 @@ private fun LogsStep(vm: MainViewModel) {
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(top = 4.dp),
     )
-    LogsCard(c)
+    LogsCard(c, vm)
     PackCard(c)
     TextButton(onClick = { vm.wizardFinish() }, modifier = Modifier.padding(top = 8.dp)) { Text("FINISH", fontSize = 12.sp) }
 }
