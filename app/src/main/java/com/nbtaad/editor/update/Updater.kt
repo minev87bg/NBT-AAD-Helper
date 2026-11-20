@@ -56,7 +56,7 @@ object Updater {
             try {
                 c.connectTimeout = 8000
                 c.readTimeout = 15000
-                c.setRequestProperty("User-Agent", "NBT-AAD-Helper")
+                c.setRequestProperty("User-Agent", "NBT-AAD-Tool")
                 c.setRequestProperty("Accept", "application/vnd.github+json")
                 when (val code = c.responseCode) {
                     200 -> c.inputStream.use { it.readBytes() }.toString(Charsets.UTF_8)
@@ -106,7 +106,7 @@ object Updater {
             try {
                 c.connectTimeout = 10000
                 c.readTimeout = 30000
-                c.setRequestProperty("User-Agent", "NBT-AAD-Helper")
+                c.setRequestProperty("User-Agent", "NBT-AAD-Tool")
                 if (c.responseCode != 200) throw IOException("GitHub answered ${c.responseCode} for the download")
                 val total = if (offer.size > 0) offer.size else c.contentLengthLong
                 digest.reset()

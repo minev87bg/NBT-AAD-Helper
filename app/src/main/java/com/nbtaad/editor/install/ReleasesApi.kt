@@ -19,7 +19,7 @@ object ReleasesApi {
             try {
                 c.connectTimeout = 8000
                 c.readTimeout = 20000
-                c.setRequestProperty("User-Agent", "NBT-AAD-Helper")
+                c.setRequestProperty("User-Agent", "NBT-AAD-Tool")
                 c.setRequestProperty("Accept", "application/vnd.github+json")
                 when (val code = c.responseCode) {
                     200 -> c.inputStream.use { it.readBytes() }.toString(Charsets.UTF_8)
@@ -67,7 +67,7 @@ object ReleasesApi {
             try {
                 c.connectTimeout = 10000
                 c.readTimeout = 30000
-                c.setRequestProperty("User-Agent", "NBT-AAD-Helper")
+                c.setRequestProperty("User-Agent", "NBT-AAD-Tool")
                 if (c.responseCode != 200) throw IOException("GitHub answered ${c.responseCode} for ${a.name}")
                 val out = ByteArrayOutputStream()
                 val buf = ByteArray(32 * 1024)

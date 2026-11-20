@@ -22,7 +22,7 @@ data class UpdateOffer(
  */
 object UpdateLogic {
     const val OWNER = "minev87bg"
-    const val REPO = "NBT-AAD-Helper"
+    const val REPO = "NBT_AAD_Tool"
     const val LATEST_URL = "https://api.github.com/repos/$OWNER/$REPO/releases/latest"
 
     /** Every CI build is released as v1.0.<run number>; the run number is also the app's versionCode. */

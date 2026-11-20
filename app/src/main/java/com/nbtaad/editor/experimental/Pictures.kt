@@ -62,7 +62,7 @@ object Pictures {
             c.connectTimeout = 10_000
             c.readTimeout = 30_000
             c.instanceFollowRedirects = true
-            c.setRequestProperty("User-Agent", "NBT-AAD-Helper")
+            c.setRequestProperty("User-Agent", "NBT-AAD-Tool")
             val code = c.responseCode
             if (code != 200) throw IOException("GitHub answered $code")
             if (c.contentLengthLong > MAX_BYTES) throw IOException("The picture is too large")

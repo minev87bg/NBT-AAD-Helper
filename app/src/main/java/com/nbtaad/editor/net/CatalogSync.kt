@@ -19,7 +19,7 @@ object CatalogSync {
         try {
             conn.connectTimeout = 8000
             conn.readTimeout = 15000
-            conn.setRequestProperty("User-Agent", "NBT-AAD-Helper")
+            conn.setRequestProperty("User-Agent", "NBT-AAD-Tool")
             conn.setRequestProperty("Accept", "text/plain")
             if (conn.responseCode != 200) throw IOException("GitHub answered ${conn.responseCode}")
             val out = ByteArrayOutputStream()

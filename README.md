@@ -18,7 +18,7 @@ new, and not yet confirmed on a car). Installing and going back are not done ove
 NBTApps.
 
 Status: **beta**. Written and tested by one person on one car; reports and logs are welcome in
-[Issues](https://github.com/minev87bg/NBT-AAD-Helper/issues). This is an unofficial tool: it is not made by or
+[Issues](https://github.com/minev87bg/NBT_AAD_Tool/issues). This is an unofficial tool: it is not made by or
 affiliated with Sq00ky, BMW, Toyota or Google. It changes software on your car's head unit; you use it at your own
 risk. License: GPL-3.0.
 

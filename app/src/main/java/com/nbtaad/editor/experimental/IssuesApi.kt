@@ -28,7 +28,7 @@ object IssuesApi {
         try {
             c.connectTimeout = 8000
             c.readTimeout = 20000
-            c.setRequestProperty("User-Agent", "NBT-AAD-Helper")
+            c.setRequestProperty("User-Agent", "NBT-AAD-Tool")
             c.setRequestProperty("Accept", "application/vnd.github+json")
             val code = c.responseCode
             val remaining = c.getHeaderField("X-RateLimit-Remaining")?.toIntOrNull()
@@ -82,7 +82,7 @@ object IssuesApi {
             c.connectTimeout = 10000
             c.readTimeout = 30000
             c.instanceFollowRedirects = true
-            c.setRequestProperty("User-Agent", "NBT-AAD-Helper")
+            c.setRequestProperty("User-Agent", "NBT-AAD-Tool")
             val code = c.responseCode
             if (code != 200) {
                 throw IOException(
@@ -127,7 +127,7 @@ object IssuesApi {
             c.connectTimeout = 10000
             c.readTimeout = 20000
             c.instanceFollowRedirects = true
-            c.setRequestProperty("User-Agent", "NBT-AAD-Helper")
+            c.setRequestProperty("User-Agent", "NBT-AAD-Tool")
             c.setRequestProperty("Range", "bytes=0-${TextFiles.SAMPLE - 1}")
             val code = c.responseCode
             if (code == 416) return@run true   // an empty file
@@ -156,7 +156,7 @@ object IssuesApi {
             c.connectTimeout = 10000
             c.readTimeout = 30000
             c.instanceFollowRedirects = true
-            c.setRequestProperty("User-Agent", "NBT-AAD-Helper")
+            c.setRequestProperty("User-Agent", "NBT-AAD-Tool")
             val code = c.responseCode
             if (code != 200) {
                 throw IOException(
