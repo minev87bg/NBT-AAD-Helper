@@ -38,6 +38,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.nbtaad.editor.experimental.ExperimentalController
 import com.nbtaad.editor.install.Described
 import com.nbtaad.editor.install.InstallController
 import com.nbtaad.editor.install.InstalledCheck
@@ -517,6 +518,13 @@ private fun PrepStatus(inst: InstallController) {
 
 @Composable
 private fun ReleaseRow(inst: InstallController, r: ReleaseInfo) {
+    var info by remember { mutableStateOf(false) }
+    if (info) {
+        val doc = remember(r) {
+            ExperimentalController.TextDoc(r.tag, r.pageUrl, ReleaseLogic.infoText(r, TimeText.full(r.published)), false)
+        }
+        TextFileDialog(doc, showCopy = false) { info = false }
+    }
     OutlinedCard(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -540,6 +548,8 @@ private fun ReleaseRow(inst: InstallController, r: ReleaseInfo) {
                     maxLines = 2,
                 )
             }
+            Spacer(Modifier.width(8.dp))
+            InfoDot { info = true }
             Spacer(Modifier.width(8.dp))
             OutlinedButton(onClick = { inst.useRelease(r) }, enabled = !inst.working) { Text("USE") }
         }

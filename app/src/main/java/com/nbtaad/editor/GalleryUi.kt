@@ -105,7 +105,7 @@ import kotlinx.coroutines.launch
  * on the phone.
  */
 @Composable
-internal fun TextFileDialog(doc: ExperimentalController.TextDoc, onClose: () -> Unit) {
+internal fun TextFileDialog(doc: ExperimentalController.TextDoc, showCopy: Boolean = true, onClose: () -> Unit) {
     val cfg = LocalConfiguration.current
     val density = LocalDensity.current
     val maxW = (cfg.screenWidthDp * 0.7f).dp
@@ -127,7 +127,8 @@ internal fun TextFileDialog(doc: ExperimentalController.TextDoc, onClose: () -> 
         val widest = lines.maxByOrNull { it.length } ?: ""
         with(density) { measurer.measure(widest, style, softWrap = false).size.width.toDp() }
     }
-    val contentW = maxOf(maxW, textW + 32.dp).coerceAtMost(with(density) { 200000f.toDp() })
+    // the scrollbars have strips of their own at the right and bottom edge; the text never goes under them
+    val contentW = maxOf(maxW - BAR_SIDE, textW + 28.dp).coerceAtMost(with(density) { 200000f.toDp() })
     val down = rememberLazyListState()
     val across = rememberScrollState()
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
@@ -150,7 +151,7 @@ internal fun TextFileDialog(doc: ExperimentalController.TextDoc, onClose: () -> 
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),
                     )
-                    TextButton(
+                    if (showCopy) TextButton(
                         onClick = {
                             copied = try {
                                 clip.setText(AnnotatedString(doc.text))
@@ -167,11 +168,11 @@ internal fun TextFileDialog(doc: ExperimentalController.TextDoc, onClose: () -> 
                 }
                 HorizontalDivider(color = MaterialTheme.colorScheme.outline)
                 Box(Modifier.weight(1f, fill = false)) {
-                    Box(Modifier.horizontalScroll(across)) {
+                    Box(Modifier.padding(end = BAR_SIDE, bottom = BAR_BOTTOM).horizontalScroll(across)) {
                         LazyColumn(
                             Modifier.width(contentW),
                             state = down,
-                            contentPadding = PaddingValues(start = 12.dp, end = 16.dp, top = 8.dp, bottom = 16.dp),
+                            contentPadding = PaddingValues(start = 12.dp, end = 16.dp, top = 8.dp, bottom = 8.dp),
                         ) {
                             if (chunks.isEmpty() || doc.text.isBlank()) {
                                 item { Text("(the file is empty)", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
@@ -185,22 +186,26 @@ internal fun TextFileDialog(doc: ExperimentalController.TextDoc, onClose: () -> 
                                         "Only the first 800 KB are shown and copied. Open the file in the browser for the rest.",
                                         fontSize = 10.sp,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.padding(top = 8.dp).widthIn(max = maxW - 44.dp),
+                                        modifier = Modifier.padding(top = 8.dp).widthIn(max = maxW - BAR_SIDE - 28.dp),
                                     )
                                 }
                             }
                         }
                     }
-                    // the scrollbars lie over the text: drag one, or touch it, to go to a place in the file
+                    // the scrollbars: drag one, or touch it, to go to a place in the file
                     Box(Modifier.matchParentSize()) {
-                        DownScrollbar(down, Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(24.dp).padding(bottom = 14.dp))
-                        AcrossScrollbar(across, Modifier.align(Alignment.BottomStart).fillMaxWidth().height(14.dp).padding(end = 24.dp))
+                        DownScrollbar(down, Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(BAR_SIDE).padding(bottom = BAR_BOTTOM))
+                        AcrossScrollbar(across, Modifier.align(Alignment.BottomStart).fillMaxWidth().height(BAR_BOTTOM).padding(end = BAR_SIDE))
                     }
                 }
             }
         }
     }
 }
+
+// the strips along the right and bottom edge of the text window that belong to the scrollbars
+private val BAR_SIDE = 24.dp
+private val BAR_BOTTOM = 14.dp
 
 // the size of what is shown in the list, worked out from the items on the screen (the pieces of a file are all alike)
 private class ListSize(val piece: Float, val content: Float, val viewport: Float)

@@ -36,6 +36,54 @@ object ReleaseLogic {
     /** "2026-05-12T10:11:12Z" to "2026-05-12". */
     fun day(iso: String): String = iso.take(10)
 
+    /**
+     * What the (i) of a release shows: the facts of the release, then the notes its author wrote, broken into lines
+     * of at most [width] characters (words are not cut, so a long link stays whole). [whenText] is the publishing
+     * time as the screen shows it.
+     */
+    fun infoText(r: ReleaseInfo, whenText: String, width: Int = 44): String {
+        val out = StringBuilder()
+        out.append(r.tag).append('\n')
+        if (r.title.isNotBlank() && r.title != r.tag) out.append(r.title).append('\n')
+        out.append('\n')
+        out.append("Published: ").append(whenText).append('\n')
+        if (r.prerelease) out.append("Pre-release: yes\n")
+        val files = wanted(r)
+        if (files.isEmpty()) {
+            out.append("Files to install: none\n")
+        } else {
+            out.append("Files to install (").append(mb(downloadSize(r))).append("):\n")
+            for (f in files) out.append("  ").append(f.name).append("  ").append(if (f.size >= 0) mb(f.size) else "?").append('\n')
+        }
+        if (r.pageUrl.isNotBlank()) out.append("Page: ").append(r.pageUrl).append('\n')
+        out.append("\nRelease notes\n-------------\n")
+        val notes = r.notes.replace("\r\n", "\n").replace('\r', '\n').trim()
+        if (notes.isEmpty()) out.append("(none written)") else out.append(wrap(notes, width).replace(Regex("\n{3,}"), "\n\n"))
+        return out.toString()
+    }
+
+    /** Text broken into lines of at most [width] characters at spaces; a list item's next lines are indented under it. */
+    fun wrap(text: String, width: Int): String =
+        text.lines().joinToString("\n") { line ->
+            val body = line.trimEnd().replace("\t", "    ")
+            if (body.length <= width) return@joinToString body
+            val lead = body.takeWhile { it == ' ' }.length
+            val item = body.drop(lead).let { it.startsWith("- ") || it.startsWith("* ") }
+            val indent = " ".repeat(lead + if (item) 2 else 0)
+            val rows = ArrayList<String>()
+            var row = StringBuilder(" ".repeat(lead))
+            for (word in body.trim().split(' ').filter { it.isNotEmpty() }) {
+                if (row.isNotBlank() && row.length + 1 + word.length > width) {
+                    rows += row.toString().trimEnd()
+                    row = StringBuilder(indent)
+                }
+                if (row.isNotBlank()) row.append(' ')
+                row.append(word)
+            }
+            rows += row.toString().trimEnd()
+            rows.joinToString("\n")
+        }
+
     fun mb(bytes: Long): String =
         if (bytes < 1024 * 1024) "${maxOf(1L, bytes / 1024)} KB" else "%.1f MB".format(bytes / 1024.0 / 1024.0)
 }

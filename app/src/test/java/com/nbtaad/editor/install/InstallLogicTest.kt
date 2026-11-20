@@ -461,6 +461,36 @@ class InstallLogicTest {
         assertEquals("1.0 MB".length, ReleaseLogic.mb(1024 * 1024).length)
     }
 
+    @Test
+    fun theInfoOfARelease() {
+        fun a(n: String, s: Long) = AssetInfo(n, s, "https://x/$n", null)
+        val notes = "Fixes the video stretch on wide screens when the phone is turned.\r\n\r\n\r\n" +
+            "- A list item that is longer than the width of the window and has to go on\r\n" +
+            "https://github.com/Sq00ky/Supra-iDrive6-Android-Auto/releases/tag/v1.9.116"
+        val r = ReleaseInfo(
+            "v1.9.116", "Video fix", true, "2026-11-20T20:59:00Z", notes, "https://github.com/x/y",
+            listOf(a("nbt-aad", 1_048_576), a("Releases.zip", 2048), a("notes.txt", 5)),
+        )
+        val t = ReleaseLogic.infoText(r, "2026-11-20 20:59  ·  1 h ago", width = 40)
+        val lines = t.lines()
+        assertEquals("v1.9.116", lines[0])
+        assertEquals("Video fix", lines[1])
+        assertTrue(t.contains("Published: 2026-11-20 20:59  ·  1 h ago"))
+        assertTrue(t.contains("Pre-release: yes"))
+        assertTrue(t.contains("  nbt-aad  1.0 MB"))
+        assertTrue(t.contains("  Releases.zip  2 KB"))
+        assertFalse(t.contains("notes.txt"))
+        assertTrue(t.contains("Page: https://github.com/x/y"))
+        val body = t.substringAfter("-------------\n")
+        assertFalse(body.contains("\r"))
+        assertFalse(body.contains("\n\n\n"))
+        // the notes are broken at spaces, a list item's next line sits under its text, a long link stays whole
+        for (l in body.lines()) assertTrue(l, l.length <= 40 || !l.contains(' '))
+        assertTrue(body.contains("\n  go on") || body.contains("\n  has to go on") || body.contains("\n  to go on"))
+        assertTrue(body.endsWith("v1.9.116"))
+        assertTrue(ReleaseLogic.infoText(r.copy(notes = "  ", title = "v1.9.116", prerelease = false), "x").endsWith("(none written)"))
+    }
+
     // ---- the version from the daemon's RAM log ----
 
     @Test
