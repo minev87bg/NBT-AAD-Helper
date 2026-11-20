@@ -68,11 +68,33 @@ object Markdown {
         return merge(out)
     }
 
-    /** The pictures of a post in the order they appear, each address once. */
-    fun pictures(blocks: List<MdBlock>): List<MdPicture> {
+    /**
+     * True for a signed picture address of GitHub ("jwt=" in it, as in a quoted reply, which copies the address the
+     * page showed) whose time is over. Such an address works for five minutes only, so it is dead long before anybody
+     * reads the page and the picture it stands for is better seen where it was first posted.
+     */
+    fun expiredSigned(url: String, nowSec: Long): Boolean {
+        val token = url.substringAfter("jwt=", "").substringBefore('&')
+        val parts = token.split('.')
+        if (parts.size != 3) return false
+        val json = try {
+            String(java.util.Base64.getUrlDecoder().decode(parts[1]), Charsets.UTF_8)
+        } catch (_: IllegalArgumentException) {
+            return false
+        }
+        val exp = Regex("\"exp\"\\s*:\\s*(\\d+)").find(json)?.groupValues?.get(1)?.toLongOrNull() ?: return false
+        return exp < nowSec
+    }
+
+    /** The pictures of a post in the order they appear, each address once; dead signed addresses are left out. */
+    fun pictures(blocks: List<MdBlock>, nowSec: Long = System.currentTimeMillis() / 1000): List<MdPicture> {
         val out = LinkedHashMap<String, MdPicture>()
         fun spans(list: List<MdSpan>) {
-            for (s in list) if (s.picture && s.link != null && s.link !in out) out[s.link] = MdPicture(s.link, s.alt)
+            for (s in list) {
+                if (s.picture && s.link != null && s.link !in out && !expiredSigned(s.link, nowSec)) {
+                    out[s.link] = MdPicture(s.link, s.alt)
+                }
+            }
         }
         fun walk(b: MdBlock) {
             when (b) {

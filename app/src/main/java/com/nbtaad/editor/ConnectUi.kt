@@ -167,7 +167,8 @@ internal fun ConnectAgainDialog(vm: MainViewModel) {
                             "Connect again",
                             "Android Auto starts over Bluetooth and then moves the phone onto the car's own WiFi. While " +
                                 "Bluetooth is on, the phone is pulled away again as soon as it joins the dongle.\n\nSo: turn " +
-                                "Bluetooth off, then press CONNECT. Android asks you to allow the connection to the dongle's " +
+                                "Bluetooth off (the switch is in the quick settings: pull the top bar down; the settings page " +
+                                "of some phones only lists devices), then press CONNECT. Android asks you to allow the connection to the dongle's " +
                                 "WiFi. When it is joined, the app carries on with the head unit.\n\nIf it does not work, the " +
                                 "WiFi list of the phone is the other way.",
                             mono = false,
@@ -191,15 +192,21 @@ internal fun ConnectAgainDialog(vm: MainViewModel) {
                         fontSize = 13.sp,
                     )
                 }
-                OutlinedButton(
+                Text(
+                    "Easiest: pull the top bar down and tap the Bluetooth switch.",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+                TextButton(
                     onClick = {
                         try {
                             ctx.startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
                         } catch (_: Exception) {
                         }
                     },
-                    modifier = Modifier.padding(top = 6.dp),
-                ) { Text("OPEN BLUETOOTH SETTINGS", fontSize = 12.sp) }
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+                ) { Text("or open the Bluetooth settings", fontSize = 11.sp) }
 
                 Spacer(Modifier.height(14.dp))
                 Text("2. Join ${dongle?.ssid ?: "the dongle's WiFi"}", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)

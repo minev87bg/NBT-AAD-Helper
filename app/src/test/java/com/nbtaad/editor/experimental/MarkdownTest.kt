@@ -274,6 +274,32 @@ class MarkdownTest {
         assertTrue(Markdown.pictures(Markdown.parse("no pictures here")).isEmpty())
     }
 
+    private fun signed(exp: Long): String {
+        val payload = "{\"iss\":\"github.com\",\"exp\":$exp,\"nbf\":${exp - 300}}"
+        val b64 = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(payload.toByteArray())
+        return "https://private-user-images.githubusercontent.com/1/2-x.jpg?jwt=eyJhbGciOiJIUzI1NiJ9.$b64.c2ln"
+    }
+
+    @Test
+    fun aSignedPictureAddressIsDeadAfterItsTime() {
+        assertTrue(Markdown.expiredSigned(signed(1_000), 1_001))
+        assertFalse(Markdown.expiredSigned(signed(1_000), 999))
+        // no "jwt=", or something that is not one: not for this to say
+        assertFalse(Markdown.expiredSigned("https://github.com/user-attachments/assets/aaaa-1111", 9_999_999_999))
+        assertFalse(Markdown.expiredSigned("https://x.test/a.png?jwt=notatoken", 9_999_999_999))
+        assertFalse(Markdown.expiredSigned("https://x.test/a.png?jwt=a.@@@.c", 9_999_999_999))
+    }
+
+    @Test
+    fun aQuotedReplyKeepsNoDeadPictureFromTheOriginal() {
+        val raw = "> thanks, works!\n> ![image](${signed(1_000)})\n\nwhat does the log say?\n\n" +
+            "![mine](https://github.com/user-attachments/assets/bbbb-2222)"
+        val pics = Markdown.pictures(Markdown.parse(raw), nowSec = 5_000)
+        assertEquals(listOf("https://github.com/user-attachments/assets/bbbb-2222"), pics.map { it.url })
+        // while its time is not over, it is shown
+        assertEquals(2, Markdown.pictures(Markdown.parse(raw), nowSec = 500).size)
+    }
+
     @Test
     fun textFilesAreToldFromOtherFiles() {
         val log = Links.file("https://github.com/user-attachments/files/123/nbt-aad.LOG", "me", "the first post")!!
