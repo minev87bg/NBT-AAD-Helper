@@ -32,8 +32,10 @@ jobs:
       - name: Unit tests (settings parser, updater)
         run: gradle testDebugUnitTest --no-daemon
 
-      # Android updates an installed app only with a copy signed by the same key, so every build uses one fixed key:
-      # the SIGNING_KEYSTORE_BASE64 secret if the repository has it, otherwise signing/nbt-aad-helper.keystore.
+      # Android updates an installed app only with a copy signed by the same key, so every release is signed with one
+      # fixed key. It lives in the repository secret SIGNING_KEYSTORE_BASE64 and is never kept in the repository.
+      # Builds that cannot see the secret (forks) are signed with a throw-away debug key; on main that is an error,
+      # so a release can never be signed with the wrong key.
       - name: Signing key
         env:
           KEYSTORE_B64: ${{ secrets.SIGNING_KEYSTORE_BASE64 }}
@@ -42,9 +44,9 @@ jobs:
             echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/app.keystore"
             echo "SIGNING_KEYSTORE=$RUNNER_TEMP/app.keystore" >> "$GITHUB_ENV"
             echo "Signing key: from the SIGNING_KEYSTORE_BASE64 secret"
-          elif [ -f signing/nbt-aad-helper.keystore ]; then
-            echo "SIGNING_KEYSTORE=$GITHUB_WORKSPACE/signing/nbt-aad-helper.keystore" >> "$GITHUB_ENV"
-            echo "Signing key: signing/nbt-aad-helper.keystore from the repository"
+          elif [ "$GITHUB_REF_NAME" = "main" ]; then
+            echo "::error::The repository secret SIGNING_KEYSTORE_BASE64 is missing: a release on main must be signed with the fixed key."
+            exit 1
           else
             echo "::warning::No signing key found. The APK gets a random debug signature and can not be installed over an earlier build."
           fi

@@ -38,7 +38,7 @@ the banner says so, and after opening it again the first screen says "Updated to
 to allow "install unknown apps" for this app.
 
 How it fits together: the build number is the GitHub run number (version `1.0.N`, versionCode `N`), the workflow
-signs every build with the fixed key in `signing/` and publishes release `v1.0.N`, and the app compares `N` with its own
+signs every build with the fixed key (a repository secret, see `signing/README.md`) and publishes release `v1.0.N`, and the app compares `N` with its own
 versionCode. The updater needs internet, like the settings sync; with none it stays quiet.
 
 Builds made before the updater (and signed with a random key) cannot be updated in place: uninstall the old app
