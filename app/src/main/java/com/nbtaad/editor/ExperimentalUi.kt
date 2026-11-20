@@ -57,6 +57,10 @@ import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -65,6 +69,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nbtaad.editor.experimental.Comment
+import com.nbtaad.editor.experimental.Contributors
 import com.nbtaad.editor.experimental.ExperimentalController
 import com.nbtaad.editor.experimental.FileKind
 import com.nbtaad.editor.experimental.FileLink
@@ -115,12 +120,44 @@ internal fun ExperimentalTheme(content: @Composable () -> Unit) {
     MaterialTheme(colorScheme = scheme, content = content)
 }
 
+private val ThanksBlueDark = Color(0xFF58A6FF)
+private val ThanksBlueLight = Color(0xFF0969DA)
+
+/** The blue of the main contributors' names (the page's amber is taken by the pages that share files). */
+@Composable
+private fun thanksBlue(): Color =
+    if (MaterialTheme.colorScheme.background.luminance() < 0.5f) ThanksBlueDark else ThanksBlueLight
+
+/** "author  ·  rest": the name of a main contributor is bold, blue, on a tag of its own; anybody else's is plain. */
+@Composable
+private fun byLine(author: String, rest: String): AnnotatedString {
+    val blue = thanksBlue()
+    val main = Contributors.isMain(author)
+    return buildAnnotatedString {
+        if (main) {
+            withStyle(SpanStyle(color = blue, fontWeight = FontWeight.Bold, background = blue.copy(alpha = 0.16f))) {
+                append(" $author ")
+            }
+        } else {
+            append(author)
+        }
+        append(rest)
+    }
+}
+
+/** The faint blue under a main contributor's post, on top of what the surface is. */
+@Composable
+private fun thanksTint(): Color =
+    thanksBlue().copy(alpha = 0.09f).compositeOver(MaterialTheme.colorScheme.surface)
+
 private const val LIST_INFO =
     "What people report, test and suggest in Sq00ky's project, read from GitHub without signing in (GitHub allows 60 " +
         "requests an hour that way; the line under the buttons says how many are left).\n\n" +
         "REFRESH loads the list in the chosen order and looks through the first posts and the newest comments for " +
         "links to files. Pages that share files are marked FILES: a test build can be taken to the installer, a log " +
         "can be read here.\n\n" +
+        "The names of Sq00ky, mhmm-ok and tom-pryor, who build the project, are lit up in blue, with a blue frame " +
+        "around their pages and comments, so that what they write is easy to find. Thank you, all three.\n\n" +
         "The star follows a page. FOLLOWING lists just those pages, open or closed.\n\n" +
         "Open a page and press PREPARE LOGS to take part: the app guides you through a test and sends its logs to " +
         "that page.\n\n" +
@@ -281,18 +318,26 @@ private fun TopicRow(exp: ExperimentalController, t: Topic, compact: Boolean) {
     val hasFiles = !files.isNullOrEmpty()
     val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
     val soft = MaterialTheme.colorScheme.onSurfaceVariant
-    // a page that shares files stands out: a thick outline in the page's amber, a faint amber tint, a solid stamp
+    val main = Contributors.isMain(t.author)
+    val blue = thanksBlue()
+    val blueTint = thanksTint()
+    // a page that shares files stands out: a thick outline in the page's amber, a faint amber tint, a solid stamp;
+    // a page of a main contributor gets a thin blue outline and a faint blue tint (files come first)
     OutlinedCard(
         onClick = { exp.select(t) },
         modifier = Modifier.fillMaxWidth().padding(vertical = if (compact) 2.dp else 4.dp),
-        colors = if (hasFiles) {
-            CardDefaults.outlinedCardColors(
+        colors = when {
+            hasFiles -> CardDefaults.outlinedCardColors(
                 containerColor = ExperimentalAmber.copy(alpha = if (dark) 0.11f else 0.16f).compositeOver(MaterialTheme.colorScheme.surface),
             )
-        } else {
-            CardDefaults.outlinedCardColors()
+            main -> CardDefaults.outlinedCardColors(containerColor = blueTint)
+            else -> CardDefaults.outlinedCardColors()
         },
-        border = if (hasFiles) BorderStroke(2.5.dp, ExperimentalAmber) else CardDefaults.outlinedCardBorder(),
+        border = when {
+            hasFiles -> BorderStroke(2.5.dp, ExperimentalAmber)
+            main -> BorderStroke(1.5.dp, blue.copy(alpha = 0.75f))
+            else -> CardDefaults.outlinedCardBorder()
+        },
     ) {
         Row(
             Modifier.padding(start = 12.dp, top = if (compact) 4.dp else 6.dp, bottom = if (compact) 4.dp else 6.dp, end = 4.dp),
@@ -308,7 +353,7 @@ private fun TopicRow(exp: ExperimentalController, t: Topic, compact: Boolean) {
                 )
                 if (compact) {
                     Text(
-                        "${t.author}  ·  ${TimeText.full(t.updated)}" + if (!t.open) "  ·  closed" else "",
+                        byLine(t.author, "  ·  ${TimeText.full(t.updated)}" + if (!t.open) "  ·  closed" else ""),
                         fontSize = 11.sp,
                         color = soft,
                         maxLines = 1,
@@ -316,11 +361,13 @@ private fun TopicRow(exp: ExperimentalController, t: Topic, compact: Boolean) {
                     )
                 } else {
                     Text(
-                        buildString {
-                            append(t.author)
-                            append("  ·  ${t.comments} comment${if (t.comments == 1) "" else "s"}")
-                            if (t.merged) append("  ·  merged") else if (t.draft) append("  ·  draft")
-                        },
+                        byLine(
+                            t.author,
+                            buildString {
+                                append("  ·  ${t.comments} comment${if (t.comments == 1) "" else "s"}")
+                                if (t.merged) append("  ·  merged") else if (t.draft) append("  ·  draft")
+                            },
+                        ),
                         fontSize = 12.sp,
                         color = soft,
                     )
@@ -459,11 +506,13 @@ private fun TopicDetail(vm: MainViewModel, t: Topic) {
                 val bodyPics = remember(body) { Markdown.pictures(body) }
                 Column(
                     Modifier.fillMaxWidth().then(
-                        if (flash == 0) Modifier.background(ExperimentalAmber.copy(alpha = 0.14f), RoundedCornerShape(8.dp)) else Modifier
+                        if (flash == 0) Modifier.background(ExperimentalAmber.copy(alpha = 0.14f), RoundedCornerShape(8.dp))
+                        else if (Contributors.isMain(t.author)) Modifier.background(thanksTint(), RoundedCornerShape(8.dp))
+                        else Modifier
                     ),
                 ) {
                     Text(
-                        "${t.author}  ·  opened ${TimeText.full(t.created)}",
+                        byLine(t.author, "  ·  opened ${TimeText.full(t.created)}"),
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -747,13 +796,21 @@ private fun CommentCard(exp: ExperimentalController, c: Comment, flash: Boolean,
     val full = remember(c) { Markdown.parse(c.body) }
     val short = remember(full) { Markdown.shorten(full) }
     val pics = remember(full) { Markdown.pictures(full) }
+    val main = Contributors.isMain(c.author)
+    val blue = thanksBlue()
+    val blueTint = thanksTint()
     OutlinedCard(
         Modifier.fillMaxWidth().padding(vertical = 4.dp),
-        border = if (flash) BorderStroke(2.dp, ExperimentalAmber) else CardDefaults.outlinedCardBorder(),
+        colors = if (main) CardDefaults.outlinedCardColors(containerColor = blueTint) else CardDefaults.outlinedCardColors(),
+        border = when {
+            flash -> BorderStroke(2.dp, ExperimentalAmber)
+            main -> BorderStroke(1.5.dp, blue.copy(alpha = 0.75f))
+            else -> CardDefaults.outlinedCardBorder()
+        },
     ) {
         Column(Modifier.padding(12.dp)) {
             Text(
-                "${c.author}  ·  ${TimeText.full(c.created)}",
+                byLine(c.author, "  ·  ${TimeText.full(c.created)}"),
                 fontSize = 12.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
