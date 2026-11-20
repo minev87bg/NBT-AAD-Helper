@@ -95,6 +95,8 @@ class SshSession(host: String) : AutoCloseable {
         /** Asked often; true stops the command and throws [SshCancelled]. */
         cancelled: (() -> Boolean)? = null,
         onSent: ((Long) -> Unit)? = null,
+        /** When positive: stop (and close the channel) once this many bytes of output have come; the exit status is then 0. */
+        maxBytes: Long = -1,
     ): Result {
         val ch = session.openChannel("exec") as ChannelExec
         ch.setCommand(cmd)
@@ -115,6 +117,7 @@ class SshSession(host: String) : AutoCloseable {
         val out = ByteArrayOutputStream()
         val buf = ByteArray(4096)
         val end = System.currentTimeMillis() + timeoutMs
+        var early = false
         try {
             while (true) {
                 if (cancelled?.invoke() == true) throw SshCancelled()
@@ -124,6 +127,10 @@ class SshSession(host: String) : AutoCloseable {
                     out.write(buf, 0, n)
                 }
                 onOut?.invoke(out.size().toLong())
+                if (maxBytes > 0 && out.size() >= maxBytes) {
+                    early = true
+                    break
+                }
                 if (ch.isClosed) {
                     while (input.available() > 0) {
                         val n = input.read(buf)
@@ -138,7 +145,7 @@ class SshSession(host: String) : AutoCloseable {
                 }
                 Thread.sleep(40)
             }
-            val res = Result(out.toByteArray(), errBuf.toString("UTF-8"), ch.exitStatus)
+            val res = Result(out.toByteArray(), errBuf.toString("UTF-8"), if (early) 0 else ch.exitStatus)
             AppLog.d(
                 "SSH",
                 "exec [${LogText.brief(cmd)}]" + (stdin?.let { " +${it.size} B in" } ?: "") +

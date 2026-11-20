@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.sp
 import com.nbtaad.editor.contribute.ContributeController
 import com.nbtaad.editor.contribute.HeadLog
 import com.nbtaad.editor.contribute.LogFinder
+import com.nbtaad.editor.contribute.LogSessions
 import com.nbtaad.editor.contribute.PackedLogs
 import com.nbtaad.editor.experimental.Topic
 
@@ -127,6 +128,7 @@ internal fun LogsCard(c: ContributeController, vm: MainViewModel? = null) {
         }
     }
     if (c.askClear) ClearLogsDialog(c)
+    if (c.sessionLog != null) SessionsDialog(c)
 }
 
 @Composable
@@ -162,6 +164,10 @@ private fun ClearLogsDialog(c: ContributeController) {
 @Composable
 private fun LogRow(c: ContributeController, l: HeadLog) {
     val soft = MaterialTheme.colorScheme.onSurfaceVariant
+    // the sessions that go into the zip instead of the whole log, when some were chosen
+    val sessions = c.sessionsOf(l)
+    val sizeText = if (sessions.isNotEmpty() && sessions.all { it.size > 0 }) LogFinder.sizeText(sessions.sumOf { it.size }) else
+        if (sessions.isEmpty()) LogFinder.sizeText(l.size) else ""
     Row(
         Modifier.fillMaxWidth().clickable(enabled = !c.packing) { c.toggle(l.path) }.padding(vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -170,10 +176,22 @@ private fun LogRow(c: ContributeController, l: HeadLog) {
         Column(Modifier.weight(1f)) {
             Text(l.name, fontSize = 14.sp, fontFamily = FontFamily.Monospace, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(
-                listOf(LogFinder.sizeText(l.size), l.place).filter { it.isNotEmpty() }.joinToString("  ·  "),
+                listOf(
+                    if (sessions.isNotEmpty()) LogSessions.numbersText(sessions.map { it.number }) else "",
+                    sizeText,
+                    l.place,
+                ).filter { it.isNotEmpty() }.joinToString("  ·  "),
                 fontSize = 11.sp,
                 color = soft,
             )
+        }
+        // the log on the stick holds many runs: the person may take some of them
+        if (l.hasSessions) {
+            TextButton(
+                onClick = { c.openSessions(l) },
+                enabled = !c.working,
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+            ) { Text("CHOOSE SESSION", fontSize = 11.sp) }
         }
     }
 }

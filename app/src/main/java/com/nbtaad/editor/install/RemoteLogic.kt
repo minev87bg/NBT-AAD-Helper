@@ -546,6 +546,91 @@ object RemoteScripts {
         """,
     )
 
+    /**
+     * The sessions in the daemon's log on the stick (one local pass of grep over the file, so it takes as long as the
+     * stick needs to be read, but only a few lines travel): `H line:byte:header` for every start, `B ...` for its build
+     * line and `G line date time` for the first GPS fix of that run. The GPS line is cut down to its time here, on the head
+     * unit, so that no position leaves it. The head unit's grep may lack -a or -b: what it knows is tried on a one-line
+     * input first, and without -b the answer has no byte offsets.
+     */
+    fun sessions(path: String): String = sh(
+        """
+        f="${path}"
+        if [ ! -f "¤f" ]; then echo "NOFILE"; exit 0; fi
+        if echo x | grep -a -b -n x >/dev/null 2>&1; then o="-a -b -n"
+        elif echo x | grep -b -n x >/dev/null 2>&1; then o="-b -n"
+        elif echo x | grep -a -n x >/dev/null 2>&1; then o="-a -n"
+        else o="-n"
+        fi
+        echo "OPTIONS ¤o"
+        gps=0
+        grep ¤o -e '^---- nbt-aad log appended to ' -e '^  Build: ' -e 'car GPS fix' "¤f" 2>/dev/null | while read -r l; do
+          case "¤l" in
+            *'---- nbt-aad log appended to '*)
+              echo "H ¤l"
+              gps=0;;
+            *'  Build: '*)
+              echo "B ¤l";;
+            *'car GPS fix'*)
+              if [ "¤gps" = 0 ]; then
+                t="¤{l##*UTC }"
+                set -- ¤t
+                d="¤1"
+                h="¤{2%?}"
+                case "¤d" in
+                  [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9])
+                    echo "G ¤{l%%:*} ¤d ¤h"
+                    gps=1;;
+                esac
+              fi;;
+          esac
+        done
+        exit 0
+        """,
+    )
+
+    /** The block size of [sessionDd]: it starts at a whole block, the app drops the bytes before the header. */
+    const val DD_BLOCK = 4096
+
+    /**
+     * One session from its byte [offset] on, with dd (it jumps there at once). [length] > 0 makes dd stop after the
+     * blocks that hold the session; otherwise it goes on to the end of the file. Nothing but the data goes to stdout; a
+     * head unit without dd answers with exit 4.
+     */
+    fun sessionDd(path: String, offset: Long, length: Long): String {
+        val skip = offset / DD_BLOCK
+        val lead = offset % DD_BLOCK
+        val count = if (length > 0) " count=${(lead + length + DD_BLOCK - 1) / DD_BLOCK}" else ""
+        return sh(
+            """
+            if type dd >/dev/null 2>&1; then
+              dd if="${path}" bs=$DD_BLOCK skip=$skip$count 2>/dev/null
+            else
+              echo "no dd" >&2
+              exit 4
+            fi
+            """,
+        )
+    }
+
+    /**
+     * One session from its header's line on, with what every shell has: `read` the lines before it away and `cat` the
+     * rest (the shell leaves a file it reads from just after the last line it took, so cat goes on from there).
+     * Slower than [sessionDd], which is why that is tried first.
+     */
+    fun sessionRead(path: String, line: Long): String = sh(
+        """
+        {
+          i=0
+          while [ ¤i -lt ${line - 1} ]; do
+            read -r x || break
+            i=¤((i+1))
+          done
+          cat
+        } < "${path}"
+        """,
+    )
+
     /** Which commands and folders the SSH login of the head unit has: shown to the person, who can send it on. */
     fun diagnose(): String = sh(
         """

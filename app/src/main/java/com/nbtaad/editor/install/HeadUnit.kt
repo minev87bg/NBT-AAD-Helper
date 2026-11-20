@@ -2,6 +2,8 @@ package com.nbtaad.editor.install
 
 import com.nbtaad.editor.contribute.HeadLog
 import com.nbtaad.editor.contribute.LogFinder
+import com.nbtaad.editor.contribute.LogSession
+import com.nbtaad.editor.contribute.LogSessions
 import com.nbtaad.editor.log.AppLog
 import com.nbtaad.editor.net.SshCancelled
 import com.nbtaad.editor.net.SshSession
@@ -143,6 +145,29 @@ object HeadUnit {
 
     private val SAFE_PATH = Regex("^/[A-Za-z0-9._/@+-]+$")
 
+    /**
+     * The sessions in a log on the USB stick (the daemon appends one after the other, each with a header). The head unit
+     * reads through the whole file for this, which the stick does slowly, but only a few lines come back. Empty when the
+     * file has no headers; throws when it cannot be looked at.
+     */
+    fun findSessions(host: String, log: HeadLog, cancelled: () -> Boolean): List<LogSession> {
+        if (!SAFE_PATH.matches(log.path)) throw IOException("The file name has characters the app will not pass on.")
+        return SshSession(host).use { ssh ->
+            val t0 = System.currentTimeMillis()
+            val r = ssh.exec(RemoteScripts.sessions(log.path), timeoutMs = 600_000, cancelled = cancelled)
+            val text = r.text
+            if (text.lineSequence().any { it.trim() == "NOFILE" }) throw IOException("The file is not on the head unit any more.")
+            val list = LogSessions.parse(text, log.size)
+            AppLog.i(
+                "Contribute",
+                "Sessions in ${log.path}: ${list.size} (" + list.joinToString { "#${it.number} line ${it.line}, ${it.size} B" } +
+                    ") in ${(System.currentTimeMillis() - t0) / 1000} s; options: " +
+                    (text.lineSequence().firstOrNull { it.startsWith("OPTIONS") }?.removePrefix("OPTIONS")?.trim() ?: "?"),
+            )
+            list
+        }
+    }
+
     /** Deletes the daemon's log files on the head unit. Returns what could not be deleted, as "name: why" (empty: all gone). */
     fun clearLogs(host: String, logs: List<HeadLog>): List<String> =
         SshSession(host).use { ssh ->
@@ -173,6 +198,8 @@ object HeadUnit {
         withEnv: Boolean,
         onProgress: (name: String, done: Long, total: Long) -> Unit,
         cancelled: () -> Boolean,
+        /** For a log (by path) that is in here only these sessions are read, each as a file of its own. */
+        sessions: Map<String, List<LogSession>> = emptyMap(),
     ): List<FileRead> =
         SshSession(host).use { ssh ->
             val out = ArrayList<FileRead>()
@@ -208,7 +235,48 @@ object HeadUnit {
                     read("nbt-aad.env", "${lay.aa}/nbt-aad.env", -1)
                 }
             }
-            for (l in logs) out += read(l.name, l.path, l.size)
+            /** One session cut out of a log: with dd where the head unit has it, else with read and cat; each is checked to start with the header. */
+            fun readSession(l: HeadLog, s: LogSession): FileRead {
+                val name = LogSessions.fileName(s.number)
+                if (!SAFE_PATH.matches(l.path)) return FileRead(name, null, "the file name has characters the app will not pass on")
+                // the newest session may still grow: it is read to the end of the file
+                val length = if (s.last) -1L else s.size
+                val total = if (s.size > 0) s.size else -1L
+                val t0 = System.currentTimeMillis()
+                onProgress(name, 0, total)
+                val ways = if (s.offset >= 0) listOf(true, false) else listOf(false)
+                for (viaDd in ways) {
+                    val way = if (viaDd) "dd" else "read"
+                    try {
+                        val lead = if (viaDd) (s.offset % RemoteScripts.DD_BLOCK).toInt() else 0
+                        val cmd = if (viaDd) RemoteScripts.sessionDd(l.path, s.offset, length) else RemoteScripts.sessionRead(l.path, s.line)
+                        val r = ssh.exec(
+                            cmd,
+                            timeoutMs = if (length > 0) 120_000L + length / 8 else 900_000L,
+                            onOut = { onProgress(name, (it - lead).coerceAtLeast(0), total) },
+                            cancelled = cancelled,
+                            maxBytes = if (length > 0) lead + length else -1L,
+                        )
+                        var bytes = LogSessions.trim(r.out, lead, length)
+                        if (bytes == null) {
+                            AppLog.w("Contribute", "Session ${s.number} via $way: not the session (exit ${r.exit}, ${r.out.size} B${r.err.trim().takeIf { it.isNotEmpty() }?.let { ", $it" } ?: ""})")
+                            continue
+                        }
+                        if (!s.last && s.size < 0) bytes = LogSessions.cutAtNextHeader(bytes)
+                        AppLog.i("Contribute", "Read session ${s.number} of ${l.path} via $way: ${bytes.size} bytes in ${(System.currentTimeMillis() - t0) / 1000} s")
+                        return FileRead(name, bytes, null)
+                    } catch (e: SshCancelled) {
+                        throw e
+                    } catch (e: Exception) {
+                        AppLog.w("Contribute", "Reading session ${s.number} via $way failed: ${e.javaClass.simpleName}: ${e.message}")
+                    }
+                }
+                return FileRead(name, null, "the head unit could not cut this session out of the log (read the whole log instead)")
+            }
+            for (l in logs) {
+                val picked = sessions[l.path].orEmpty()
+                if (picked.isEmpty()) out += read(l.name, l.path, l.size) else for (s in picked) out += readSession(l, s)
+            }
             out
         }
 

@@ -84,7 +84,19 @@ class ContributeController(
     var clearMessage by mutableStateOf(""); private set
     var clearError by mutableStateOf(false); private set
 
-    val working: Boolean get() = looking || packing || clearing
+    // choosing the sessions of a log on the USB stick
+    /** The log whose sessions the window shows; null while it is closed. */
+    var sessionLog by mutableStateOf<HeadLog?>(null); private set
+    var sessionList by mutableStateOf<List<LogSession>?>(null); private set
+    var sessionsLooking by mutableStateOf(false); private set
+    var sessionMessage by mutableStateOf(""); private set
+    var sessionError by mutableStateOf(false); private set
+    /** Per log (by path) the numbers of the sessions to pack; a log that is not in here is packed whole. */
+    var chosenSessions by mutableStateOf<Map<String, Set<Int>>>(emptyMap()); private set
+    private val knownSessions = HashMap<String, List<LogSession>>()
+    @Volatile private var cancelSessions = false
+
+    val working: Boolean get() = looking || packing || clearing || sessionsLooking
 
     /** The page to attach the zip on: the chosen issue or pull request (scrolled to the comment box), else a new issue. */
     fun pageUrl(): String =
@@ -116,6 +128,9 @@ class ContributeController(
                     HeadUnit.findLogs(it)
                 }
                 logs = found
+                // a new look may show other files: what was chosen of the old ones is not valid any more
+                knownSessions.clear()
+                chosenSessions = emptyMap()
                 // the daemon's own log and the app's are ticked; older and extra ones are for the person to add
                 picked = found.filter { it.name == "nbt-aad.log" || it.name == "nbt-aad-app.log" }.map { it.path }.toSet()
                 lookMessage = ""
@@ -161,6 +176,77 @@ class ContributeController(
             }
             look()
         }
+    }
+
+    /** Opens the window to choose sessions of [l]; the head unit is asked for the list once (it is kept until the next look). */
+    fun openSessions(l: HeadLog) {
+        if (working) return
+        sessionLog = l
+        sessionError = false
+        sessionMessage = ""
+        sessionList = knownSessions[l.path]
+        if (sessionList == null) listSessions(l)
+    }
+
+    /** Asks the head unit for the session headers of [l] (slow: it reads through the whole file on the stick). */
+    fun listSessions(l: HeadLog) {
+        if (sessionsLooking) return
+        cancelSessions = false
+        sessionsLooking = true
+        sessionError = false
+        sessionMessage = if (host() == null) "Looking for the car…" else "Looking through ${l.name} on the USB stick…"
+        scope.launch(Dispatchers.IO) {
+            try {
+                NetworkBinder.bindToLocalNetwork(ctx)
+                val found = runOnHeadUnit(host, rescan, onRescan = { sessionMessage = lookingNote() }, whyNot = problem) {
+                    sessionMessage = "Looking through ${l.name} on the USB stick…"
+                    HeadUnit.findSessions(it, l) { cancelSessions }
+                }
+                knownSessions[l.path] = found
+                if (sessionLog?.path == l.path) sessionList = found
+                sessionMessage = ""
+            } catch (e: SshCancelled) {
+                AppLog.i("Contribute", "Looking for sessions stopped by the person")
+                sessionMessage = "Stopped."
+            } catch (e: Exception) {
+                AppLog.e("Contribute", "Looking for the sessions failed", e)
+                sessionError = true
+                sessionMessage = friendlyError(e)
+            } finally {
+                sessionsLooking = false
+            }
+        }
+    }
+
+    /** Closes the window; a list that is still being looked for is stopped. */
+    fun closeSessions() {
+        cancelSessions = true
+        sessionLog = null
+        sessionError = false
+        sessionMessage = ""
+    }
+
+    /** Packs only these sessions of [l] (it is ticked too). */
+    fun useSessions(l: HeadLog, numbers: Set<Int>) {
+        if (numbers.isEmpty()) return
+        chosenSessions = chosenSessions + (l.path to numbers)
+        picked = picked + l.path
+        forgetPacked()
+        closeSessions()
+    }
+
+    /** Back to the whole log. */
+    fun useWholeLog(l: HeadLog) {
+        chosenSessions = chosenSessions - l.path
+        picked = picked + l.path
+        forgetPacked()
+        closeSessions()
+    }
+
+    /** The sessions that [l] is packed with (oldest first), or empty for the whole log. */
+    fun sessionsOf(l: HeadLog): List<LogSession> {
+        val nums = chosenSessions[l.path] ?: return emptyList()
+        return knownSessions[l.path].orEmpty().filter { it.number in nums }
     }
 
     fun setEnv(on: Boolean) {
@@ -229,6 +315,7 @@ class ContributeController(
                             it, chosen, forEnv,
                             onProgress = { name, done, total -> packLabel = name; packDone = done; packTotal = total },
                             cancelled = { cancel },
+                            sessions = chosen.mapNotNull { l -> sessionsOf(l).takeIf { s -> s.isNotEmpty() }?.let { s -> l.path to s } }.toMap(),
                         )
                     }
                 }

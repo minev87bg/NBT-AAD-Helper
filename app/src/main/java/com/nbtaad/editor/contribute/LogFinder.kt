@@ -4,6 +4,9 @@ package com.nbtaad.editor.contribute
 class HeadLog(val path: String, val size: Long, val stamp: String = "") {
     val name: String get() = path.substringAfterLast('/')
 
+    /** The log of the daemon on a USB stick keeps every run one after the other; the others are of one run. */
+    val hasSessions: Boolean get() = name == "nbt-aad.log" && "/umass" in path
+
     /** Where it lives, in words: the RAM logs are gone at the next reboot, which is why the page is worth opening first. */
     val place: String
         get() = when {
