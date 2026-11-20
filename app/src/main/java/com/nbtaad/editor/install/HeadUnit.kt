@@ -88,14 +88,55 @@ object HeadUnit {
                 "echo 'hu-omap nbtapp:'; ls /net/hu-omap/var/opt/nbtapp /net/hu-omap/var/opt/nbtapp/apps 2>&1 | head -12"
         ).text.trim().take(900)
 
-    private fun notFound(ssh: SshSession): IOException = IOException(
-        "The NBT-AAD folder (/opt/aa, or the folders of NBTApps in /var/opt/nbtapp) was not found on the head unit. " +
-            "Is NBT-AAD installed?\n" +
-            "What the SSH shell can see:\n" + diagnoseFolders(ssh)
-    )
+    /** Android Auto is on the head unit, but not where this app puts it (/opt/aa) or where NBTApps does. */
+    class UnfamiliarLayout(val found: RemoteScripts.ForeignInstall) : IOException(unfamiliarNote(found))
+
+    /** The words to type before this app removes Android Auto from a layout it does not know. */
+    const val SURE = "I am sure"
+
+    fun isSure(typed: String): Boolean =
+        typed.trim().split(Regex("\\s+")).joinToString(" ").equals(SURE, ignoreCase = true)
+
+    fun unfamiliarNote(f: RemoteScripts.ForeignInstall): String = buildString {
+        append("Android Auto is installed here in a layout this app does not know")
+        if (f.plugin != null) append(": the plugin is in ${f.plugin}")
+        if (f.seen != null) append(if (f.plugin != null) ", and the daemon runs from ${f.seen}" else ": the daemon runs from ${f.seen}")
+        append(". For safety this app does not manage such installs: no install, no settings, no Go back. ")
+        append("Remove it with the tool that installed it last, and then use this app.")
+        if (f.manageable) {
+            append(" The Uninstall button below can still remove it, after you type \"$SURE\".")
+        } else {
+            append(" The daemon is not running, so the app cannot see where it lives and cannot remove it either.")
+        }
+    }
+
+    private fun notFound(ssh: SshSession, probeText: String? = null): IOException {
+        // Android Auto may be there, in another place: say so instead of "not installed"
+        val text = probeText ?: try { ssh.exec(RemoteScripts.probe(), timeoutMs = 60_000).text } catch (e: SshCancelled) { throw e } catch (e: Exception) { "" }
+        foreignOf(ssh, text)?.let { return UnfamiliarLayout(it) }
+        return IOException(
+            "The NBT-AAD folder (/opt/aa, or the folders of NBTApps in /var/opt/nbtapp) was not found on the head unit. " +
+                "Is NBT-AAD installed?\n" +
+                "What the SSH shell can see:\n" + diagnoseFolders(ssh)
+        )
+    }
+
+    /** What there is of Android Auto when none of the known layouts is there, or null when nothing. */
+    private fun foreignOf(ssh: SshSession, probeText: String): RemoteScripts.ForeignInstall? {
+        val scan = RemoteScripts.parseForeign(probeText)
+        if (scan.plugin == null && scan.exes.isEmpty()) return null
+        val first = scan.exes.firstOrNull()
+        val file = first?.let { e ->
+            val cands = RemoteScripts.exeCandidates(e)
+            if (cands.isEmpty()) null
+            else try { RemoteScripts.parseExeFile(ssh.exec(RemoteScripts.resolveExe(cands), timeoutMs = 30_000).text) } catch (x: SshCancelled) { throw x } catch (x: Exception) { null }
+        }
+        return RemoteScripts.ForeignInstall(scan.plugin, first?.path, file)
+    }
 
     private fun locate(ssh: SshSession): Layout {
-        return layoutOf(ssh.exec(RemoteScripts.locate()).text) ?: throw notFound(ssh)
+        val text = ssh.exec(RemoteScripts.locate()).text
+        return layoutOf(text) ?: throw notFound(ssh)
     }
 
     /** The first look at the head unit, in one command: where the folders are, and whether Android Auto runs. */
@@ -103,7 +144,7 @@ object HeadUnit {
 
     private fun probe(ssh: SshSession): Probe {
         val text = ssh.exec(RemoteScripts.probe(), timeoutMs = 60_000).text
-        val lay = layoutOf(text) ?: throw notFound(ssh)
+        val lay = layoutOf(text) ?: throw notFound(ssh, text)
         return Probe(lay, RemoteScripts.parseProc(text))
     }
 
@@ -546,32 +587,87 @@ object HeadUnit {
             ssh.exec(RemoteScripts.uninstall(lay.aa, lay.plugin, lay.va, keepEnv = false, apply = false), timeoutMs = 60_000).text
         )
 
-    /** What an uninstall would do, without doing anything. */
+    /** What the first look found: a layout this app knows, or something of Android Auto that it does not. */
+    private sealed class Found {
+        class Known(val probe: Probe) : Found()
+        class Foreign(val install: RemoteScripts.ForeignInstall, val scan: ProcScan) : Found()
+    }
+
+    private fun look(ssh: SshSession): Found {
+        val text = ssh.exec(RemoteScripts.probe(), timeoutMs = 60_000).text
+        val lay = layoutOf(text)
+        if (lay != null) return Found.Known(Probe(lay, RemoteScripts.parseProc(text)))
+        val f = foreignOf(ssh, text) ?: throw notFound(ssh, text)
+        return Found.Foreign(f, RemoteScripts.parseProc(text))
+    }
+
+    private fun planOfForeign(ssh: SshSession, f: RemoteScripts.ForeignInstall): RemoteScripts.UninstallPlan =
+        RemoteScripts.parseUninstall(
+            ssh.exec(
+                RemoteScripts.uninstall(f.dir!!, f.plugin, null, keepEnv = false, apply = false, foreignExe = f.exe),
+                timeoutMs = 60_000,
+            ).text,
+            f,
+        )
+
+    /** What an uninstall would do, without doing anything. For a layout this app does not know the plan says so ([UninstallPlan.foreign]). */
     fun uninstallPlan(host: String): RemoteScripts.UninstallPlan =
         SshSession(host).use { ssh ->
-            val lay = locate(ssh)
-            if (lay.nbtApps) throw IOException(NBTAPPS_UNINSTALL_NOTE)
-            planOf(ssh, lay).also {
-                if (it.failed != null) throw IOException("Looking at the head unit failed (${it.failed}).")
+            val plan = when (val found = look(ssh)) {
+                is Found.Known -> {
+                    if (found.probe.layout.nbtApps) throw IOException(NBTAPPS_UNINSTALL_NOTE)
+                    planOf(ssh, found.probe.layout)
+                }
+                is Found.Foreign -> {
+                    if (!found.install.manageable) throw UnfamiliarLayout(found.install)
+                    planOfForeign(ssh, found.install)
+                }
             }
+            if (plan.failed != null) throw IOException("Looking at the head unit failed (${plan.failed}).")
+            plan
         }
 
     /** What an uninstall did and what is still there afterwards that should not be. */
     class Removal(val plan: RemoteScripts.UninstallPlan, val problems: List<String>)
 
-    fun uninstall(host: String, rep: Reporter, keepEnv: Boolean): Removal {
+    /**
+     * Removes Android Auto. For a layout this app does not know, [confirmed] must be what the person was shown and typed
+     * "I am sure" for; if the head unit looks different now, nothing is done.
+     */
+    fun uninstall(host: String, rep: Reporter, keepEnv: Boolean, confirmed: RemoteScripts.ForeignInstall? = null): Removal {
         val clock = Clock()
         rep.say("Logging in to $host…", Level.INFO)
         return SshSession(host).use { ssh ->
             rep.say("Logged in (${clock.step()}).", Level.INFO)
-            val pr = probe(ssh)
-            val lay = pr.layout
-            if (lay.nbtApps) throw IOException(NBTAPPS_UNINSTALL_NOTE)
-            rep.say("NBT-AAD folder: ${lay.aa}", Level.INFO)
-            stopDaemon(ssh, rep, pr.scan)
+            val changed = IOException("The head unit looks different from when the list was made. Nothing was removed; open Uninstall again.")
+            val found = look(ssh)
+            val script: (Boolean) -> String
+            val scan: ProcScan
+            val foreign: RemoteScripts.ForeignInstall?
+            when (found) {
+                is Found.Known -> {
+                    val lay = found.probe.layout
+                    if (lay.nbtApps) throw IOException(NBTAPPS_UNINSTALL_NOTE)
+                    if (confirmed != null) throw changed
+                    rep.say("NBT-AAD folder: ${lay.aa}", Level.INFO)
+                    script = { apply -> RemoteScripts.uninstall(lay.aa, lay.plugin, lay.va, keepEnv, apply) }
+                    scan = found.probe.scan
+                    foreign = null
+                }
+                is Found.Foreign -> {
+                    val f = found.install
+                    if (confirmed == null) throw UnfamiliarLayout(f)
+                    if (!f.manageable || !f.same(confirmed)) throw changed
+                    rep.say("Unfamiliar layout, confirmed with \"$SURE\": the daemon is ${f.file}, the plugin ${f.plugin ?: "not there"}.", Level.WARN)
+                    script = { apply -> RemoteScripts.uninstall(f.dir!!, f.plugin, null, keepEnv, apply, f.exe) }
+                    scan = found.scan
+                    foreign = f
+                }
+            }
+            stopDaemon(ssh, rep, scan)
             clock.step()
-            val r = ssh.exec(RemoteScripts.uninstall(lay.aa, lay.plugin, lay.va, keepEnv, apply = true), timeoutMs = 120_000)
-            val plan = RemoteScripts.parseUninstall(r.text)
+            val r = ssh.exec(script(true), timeoutMs = 120_000)
+            val plan = RemoteScripts.parseUninstall(r.text, foreign)
             if (r.exit != 0 || !plan.done || plan.failed != null) throw stepFailure("Removing Android Auto", r.exit, r.err)
             if (plan.remountFailed) rep.say("The partition could not be made writable (continuing).", Level.WARN)
             for ((from, to) in plan.moves) rep.say("Moved aside: $from -> $to", Level.INFO)
@@ -579,7 +675,7 @@ object HeadUnit {
             for (k in plan.kept) rep.say("Kept: $k", Level.INFO)
             for (l in plan.left) rep.say("Left alone (not part of NBT-AAD): $l", Level.WARN)
             // look again: what a second uninstall would still remove was not removed
-            val again = try { planOf(ssh, lay) } catch (e: Exception) { null }
+            val again = try { RemoteScripts.parseUninstall(ssh.exec(script(false), timeoutMs = 60_000).text, foreign) } catch (e: SshCancelled) { throw e } catch (e: Exception) { null }
             val problems = ArrayList<String>()
             again?.let { a ->
                 val rest = a.removes.filter { !it.endsWith("/NbtAad.old") } + (if (keepEnv) emptyList() else a.envFiles)

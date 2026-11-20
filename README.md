@@ -17,6 +17,14 @@ installed by [NBTApps](https://github.com/tom-pryor/nbtapps) is recognised too (
 new, and not yet confirmed on a car). Installing and going back are not done over an NBTApps install: update it in
 NBTApps.
 
+**Uninstall** takes an install made by this app (or by hand in `/opt/aa`) off the head unit again, so that another
+installer finds it clean. It lists exactly what it would remove and changes nothing until you confirm: the daemon and its
+leftovers, the settings file (unless you keep it) and the flag files go; the plugin folder is moved aside as
+`/opt/aa/NbtAad.old`, not deleted. Restart the head unit afterwards. An install made by NBTApps is not touched (remove it in
+NBTApps). Android Auto installed in some other layout is not managed, for safety: the app says where it found it, and
+advises removing it with the tool that installed it. As a last resort Uninstall can remove it from there after you type
+`I am sure`; it then removes only the daemon file of that folder and its known leftovers, and moves the plugin aside.
+
 Status: **beta**. Written and tested by one person on one car; reports and logs are welcome in
 [Issues](https://github.com/minev87bg/NBT_AAD_Tool/issues). This is an unofficial tool: it is not made by or
 affiliated with Sq00ky, BMW, Toyota or Google. It changes software on your car's head unit; you use it at your own

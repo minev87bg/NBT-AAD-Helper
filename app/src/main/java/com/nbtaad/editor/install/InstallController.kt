@@ -96,6 +96,8 @@ class InstallController(
     var uninstallPlan by mutableStateOf<RemoteScripts.UninstallPlan?>(null)
     var uninstallProblem by mutableStateOf<String?>(null)
     var uninstallKeepEnv by mutableStateOf(false)
+    /** What was typed for an install of an unfamiliar layout: it is removed only after "I am sure". */
+    var uninstallSure by mutableStateOf("")
     var revertDaemon by mutableStateOf(true)
     var revertPlugin by mutableStateOf(false)
     var diagText by mutableStateOf<String?>(null)
@@ -492,11 +494,12 @@ class InstallController(
         uninstallPlan = null
         uninstallProblem = null
         uninstallKeepEnv = false
+        uninstallSure = ""
         scope.launch(Dispatchers.IO) {
             try {
                 NetworkBinder.bindToLocalNetwork(ctx)
                 val plan = runOnHeadUnit(host, rescan, onRescan = { }, whyNot = problem) { HeadUnit.uninstallPlan(it) }
-                AppLog.i("Uninstall", "Plan: ${plan.moves.size} moves, ${plan.removes.size} removed, ${plan.envFiles.size} settings files, ${plan.left.size} left alone")
+                AppLog.i("Uninstall", "Plan: ${plan.moves.size} moves, ${plan.removes.size} removed, ${plan.envFiles.size} settings files, ${plan.left.size} left alone" + if (plan.foreign != null) " (unfamiliar layout: ${plan.foreign.file})" else "")
                 uninstallPlan = plan
             } catch (e: Exception) {
                 AppLog.e("Uninstall", "Looking at the head unit failed", e)
@@ -510,8 +513,11 @@ class InstallController(
     fun uninstall() {
         if (working) return
         val keep = uninstallKeepEnv
+        val foreign = uninstallPlan?.foreign
+        // a layout this app does not know is removed only when the person has typed the words
+        if (foreign != null && !HeadUnit.isSure(uninstallSure)) return
         askUninstall = false
-        AppLog.i("Uninstall", "Uninstall started, keeping nbt-aad.env: $keep")
+        AppLog.i("Uninstall", "Uninstall started, keeping nbt-aad.env: $keep" + if (foreign != null) ", unfamiliar layout confirmed" else "")
         job = RunState(RunKind.UNINSTALL, emptyList(), RunStatus.RUNNING)
         scope.launch(Dispatchers.IO) {
             try {
@@ -521,7 +527,7 @@ class InstallController(
                     host, rescan,
                     onRescan = { addLine(lookingNote(), Level.WARN) },
                     whyNot = problem,
-                ) { HeadUnit.uninstall(it, rep, keep) }
+                ) { HeadUnit.uninstall(it, rep, keep, foreign) }
                 val headline = "Android Auto was removed from the head unit."
                 addLine(headline, if (out.problems.isEmpty()) Level.OK else Level.WARN)
                 finish(RunStatus.OK, headline, out.problems, pluginChanged = out.plan.moves.isNotEmpty())

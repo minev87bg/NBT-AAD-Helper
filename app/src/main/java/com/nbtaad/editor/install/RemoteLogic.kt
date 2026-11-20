@@ -133,7 +133,7 @@ object RemoteScripts {
               if [ -e ¤p/exefile ]; then
                 x=""
                 read x < ¤p/exefile 2>/dev/null
-                case "¤x" in *nbt-aad*) echo "PID ¤d ¤{p##*/}";; esac
+                case "¤x" in *nbt-aad*) echo "PID ¤d ¤{p##*/}"; echo "EXE ¤d ¤{p##*/} ¤x";; esac
               fi
             done
           fi
@@ -474,12 +474,22 @@ object RemoteScripts {
      * nbt-aad.env and its backups too unless [keepEnv], and the files the iDrive menu's checkboxes keep in /var/opt/aa.
      * Only names this app knows are touched; anything else in /opt/aa is reported as left. Output lines: MV, RM, RMENV,
      * KEEP, LEFT, REMOUNT, FAIL and DONE (see [parseUninstall]).
+     *
+     * With [foreignExe] (the file name of a daemon that runs from a folder this app did not make, found by
+     * [parseForeign]) [aa] is that daemon's folder instead of /opt/aa. It is the same list of names plus that daemon file;
+     * nothing else in the folder is touched or even listed, and the settings folder in /var/opt/aa is not looked at.
      */
-    fun uninstall(aa: String, pl: String?, va: String?, keepEnv: Boolean, apply: Boolean): String {
+    fun uninstall(aa: String, pl: String?, va: String?, keepEnv: Boolean, apply: Boolean, foreignExe: String? = null): String {
         // it deletes: never anything but the folders it was made for
-        require(aa.endsWith("/opt/aa")) { "not the NBT-AAD folder: $aa" }
-        require(pl == null || pl.endsWith("/Plugins/NbtAad")) { "not the plugin folder: $pl" }
-        require(va == null || va.endsWith("/var/opt/aa")) { "not the settings folder: $va" }
+        if (foreignExe == null) {
+            require(aa.endsWith("/opt/aa")) { "not the NBT-AAD folder: $aa" }
+        } else {
+            require(SAFE_PATH.matches(aa) && !aa.contains("..")) { "not a folder this app can clean: $aa" }
+            require(shortPath(aa).isNotEmpty()) { "that folder is the root of a file system: $aa" }
+            require(EXE_NAME.matches(foreignExe)) { "not the name of an nbt-aad daemon: $foreignExe" }
+        }
+        require(pl == null || (pl.endsWith("/Plugins/NbtAad") && SAFE_PATH.matches(pl))) { "not the plugin folder: $pl" }
+        require(va == null || (foreignExe == null && va.endsWith("/var/opt/aa"))) { "not the settings folder: $va" }
         val body = (if (apply) REMOUNT_PART + "\n" else "") +
             "apply=" + (if (apply) "1" else "0") + "\nkeep=" + (if (keepEnv) "1" else "0") + "\n" +
             """
@@ -503,7 +513,7 @@ object RemoteScripts {
                 n=¤{f##*/}
                 case ¤n in
                   NbtAad.old) ;;
-                  nbt-aad|nbt-aad.old|nbt-aad.new|nbt-aad.broken|nbt-aad.swap|pf_aa|NbtAad.new)
+                  nbt-aad|nbt-aad.old|nbt-aad.new|nbt-aad.broken|nbt-aad.swap|pf_aa|NbtAad.new@EXTRA@)
                     echo "RM ¤f"
                     if [ ¤apply = 1 ]; then rm -rf ¤f; fi ;;
                   nbt-aad.env|nbt-aad.env.orig|nbt-aad.env.bak|nbt-aad.env.bak2|nbt-aad.env.bak3|nbt-aad.env.new)
@@ -513,11 +523,12 @@ object RemoteScripts {
                       echo "RMENV ¤f"
                       if [ ¤apply = 1 ]; then rm -f ¤f; fi
                     fi ;;
-                  *) echo "LEFT ¤f" ;;
+                  *) @LEFT@ ;;
                 esac
               fi
             done
-            """.trimIndent() + "\n" +
+            """.trimIndent().replace("@EXTRA@", if (foreignExe != null) "|$foreignExe" else "")
+                .replace("@LEFT@", if (foreignExe != null) ":" else "echo \"LEFT ¤f\"") + "\n" +
             (if (va != null) """
             if [ -d @VA@ ]; then
               for f in @VA@/*; do
@@ -534,6 +545,72 @@ object RemoteScripts {
         return sh(body, aa, pl ?: "", va = va ?: "")
     }
 
+    /** Characters a path may have when it goes into a script unquoted. */
+    private val SAFE_PATH = Regex("^/[A-Za-z0-9_./-]+$")
+    private val EXE_NAME = Regex("^nbt-aad[A-Za-z0-9_.-]*$")
+
+    /** The folders of a path below the file system it is on, so "/net/hu-omap/fs/sda0" alone has none. */
+    private fun shortPath(p: String): List<String> {
+        var parts = p.split('/').filter { it.isNotEmpty() }
+        if (parts.take(2) == listOf("net", "hu-omap")) parts = parts.drop(2)
+        if (parts.take(2) == listOf("fs", "sda0")) parts = parts.drop(2)
+        return parts
+    }
+
+    /** A daemon process that the process scan saw: [dir] is the /proc it was seen in, [path] where it was started from. */
+    class SeenExe(val dir: String, val pid: Int, val path: String)
+
+    /** What the first look found when there is no /opt/aa: the plugin folder and the daemons that run. */
+    class ForeignScan(val plugin: String?, val exes: List<SeenExe>)
+
+    /**
+     * Something of NBT-AAD that is not in a layout this app knows: [plugin] (the folder iDrive loads it from, the same for
+     * every installer), [seen] the path the running daemon reports and [file] that daemon as this login can reach it.
+     * Without [file] (the daemon does not run) the app cannot tell where it lives.
+     */
+    class ForeignInstall(val plugin: String?, val seen: String?, val file: String?) {
+        val dir: String? get() = file?.substringBeforeLast('/', "")?.takeIf { it.isNotEmpty() }
+        val exe: String? get() = file?.substringAfterLast('/')?.takeIf { EXE_NAME.matches(it) }
+        val manageable: Boolean get() = dir != null && exe != null
+        fun same(o: ForeignInstall) = plugin == o.plugin && file == o.file
+    }
+
+    /** The plugin folder (the first prefix that has it) and the daemons seen, from the output of [probe]. */
+    fun parseForeign(out: String): ForeignScan {
+        var plugin: String? = null
+        val exes = ArrayList<SeenExe>()
+        for (raw in out.lines()) {
+            val line = raw.trim()
+            when {
+                line.startsWith("PL ") && plugin == null -> plugin = line.substring(3).trim()
+                line.startsWith("EXE ") -> {
+                    val t = line.split(Regex("\\s+"), limit = 4)
+                    val pid = t.getOrNull(2)?.toIntOrNull()
+                    val path = t.getOrNull(3)?.trim()
+                    if (pid != null && !path.isNullOrEmpty() && path.startsWith("/")) exes += SeenExe(t[1], pid, path)
+                }
+            }
+        }
+        return ForeignScan(plugin, exes)
+    }
+
+    /**
+     * Where a running daemon's file can be reached from this login. What /proc says is a path on the processor it runs
+     * on; from this one the other processor is /net/hu-omap.
+     */
+    fun exeCandidates(e: SeenExe): List<String> =
+        listOf(if (e.dir == "/proc") e.path else "/net/hu-omap" + e.path, e.path, "/net/hu-omap" + e.path)
+            .distinct().filter { SAFE_PATH.matches(it) && !it.contains("..") }
+
+    /** Prints `EXEFILE <path>` for the first of [candidates] that is a file. */
+    fun resolveExe(candidates: List<String>): String {
+        require(candidates.all { SAFE_PATH.matches(it) }) { "unsafe path" }
+        return sh(candidates.joinToString("\n") { "if [ -f \"$it\" ]; then echo \"EXEFILE $it\"; exit 0; fi" } + "\nexit 0")
+    }
+
+    fun parseExeFile(out: String): String? =
+        out.lines().map { it.trim() }.firstOrNull { it.startsWith("EXEFILE ") }?.substring(8)?.trim()?.takeIf { it.isNotEmpty() }
+
     /** What [uninstall] printed. */
     class UninstallPlan(
         val moves: List<Pair<String, String>>,   // (from, to): a folder moved aside
@@ -544,12 +621,14 @@ object RemoteScripts {
         val remountFailed: Boolean,
         val done: Boolean,
         val failed: String?,
+        /** Set when this is not a layout the app knows: the list is for that, and it asks for a typed confirmation. */
+        val foreign: ForeignInstall? = null,
     ) {
         /** Nothing of NBT-AAD is on the head unit. */
         val nothing: Boolean get() = moves.isEmpty() && removes.isEmpty() && envFiles.isEmpty() && kept.isEmpty()
     }
 
-    fun parseUninstall(out: String): UninstallPlan {
+    fun parseUninstall(out: String, foreign: ForeignInstall? = null): UninstallPlan {
         val moves = ArrayList<Pair<String, String>>()
         val removes = ArrayList<String>()
         val env = ArrayList<String>()
@@ -572,7 +651,7 @@ object RemoteScripts {
                 line == "DONE" -> done = true
             }
         }
-        return UninstallPlan(moves, removes, env, kept, left, remount, done, failed)
+        return UninstallPlan(moves, removes, env, kept, left, remount, done, failed, foreign)
     }
 
     /** Does the output of [prepare] or [apply] say the partition could not be made writable? */

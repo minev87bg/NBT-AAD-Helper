@@ -193,4 +193,119 @@ class UninstallScriptTest {
         assertEquals("plugin", RemoteScripts.parseUninstall("FAIL plugin\n").failed)
         assertFalse(RemoteScripts.parseUninstall("").done)
     }
+
+    // ---- an install in a layout this app does not know ----
+
+    @Test
+    fun anUnfamiliarFolderLosesOnlyTheNamesOfNbtAadAndEverythingElseStaysUnlisted() {
+        assumeTrue(File("/bin/sh").canExecute())
+        val root = File.createTempFile("nbt-aad-foreign", "").also { it.delete() }
+        try {
+            val dir = File(root, "opt/someone-elses").also { it.mkdirs() }
+            val plugin = File(root, "opt/hmi/ID5/data/ro/Plugins/NbtAad").also { it.mkdirs() }
+            File(plugin, "libNbtAad.so").writeText("lib")
+            for (n in listOf("nbt-aad-v2", "nbt-aad.env", "pf_aa", "their-tool", "readme.txt")) File(dir, n).writeText(n)
+            File(dir, "their-data").mkdirs()
+            RemoteScripts.pathFix = ""
+            fun script(apply: Boolean) = RemoteScripts.uninstall(dir.path, plugin.path, null, keepEnv = false, apply = apply, foreignExe = "nbt-aad-v2")
+            val said = RemoteScripts.parseUninstall(run(script(false)))
+            assertTrue(File(dir, "nbt-aad-v2").exists())
+            assertEquals(listOf(File(dir, "nbt-aad-v2").path, File(dir, "pf_aa").path), said.removes.sorted())
+            assertEquals(listOf(File(dir, "nbt-aad.env").path), said.envFiles)
+            assertTrue("other files are not even listed", said.left.isEmpty())
+            val did = RemoteScripts.parseUninstall(run(script(true)))
+            assertTrue(did.done)
+            assertFalse(File(dir, "nbt-aad-v2").exists())
+            assertFalse(File(dir, "pf_aa").exists())
+            assertFalse(File(dir, "nbt-aad.env").exists())
+            assertEquals("their-tool", File(dir, "their-tool").readText())
+            assertEquals("readme.txt", File(dir, "readme.txt").readText())
+            assertTrue(File(dir, "their-data").isDirectory)
+            assertFalse(plugin.exists())
+            assertEquals("lib", File(dir, "NbtAad.old/libNbtAad.so").readText())
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun anUnfamiliarFolderIsRefusedWhenItCouldNotBeSafelyNamed() {
+        fun refused(aa: String, exe: String?, pl: String? = null, va: String? = null) =
+            runCatching { RemoteScripts.uninstall(aa, pl, va, keepEnv = false, apply = true, foreignExe = exe) }.exceptionOrNull() is IllegalArgumentException
+        assertTrue(refused("/", "nbt-aad"))
+        assertTrue(refused("/net/hu-omap/fs/sda0", "nbt-aad"))
+        assertTrue(refused("/opt/a b", "nbt-aad"))
+        assertTrue(refused("/opt/a;rm -rf /", "nbt-aad"))
+        assertTrue(refused("/opt/../etc", "nbt-aad"))
+        assertTrue(refused("/opt/foo", "rm"))
+        assertTrue(refused("/opt/foo", "nbt-aad; rm x"))
+        assertTrue(refused("/opt/foo", "nbt-aad", va = "/var/opt/aa"))
+        assertTrue(refused("/opt/foo", "nbt-aad", pl = "/opt/hmi"))
+        assertFalse(refused("/opt/foo", "nbt-aad", pl = "/opt/hmi/ID5/data/ro/Plugins/NbtAad"))
+        assertFalse(refused("/net/hu-omap/fs/sda0/opt/foo", "nbt-aad-v2"))
+    }
+
+    @Test
+    fun theProbeSaysWhereTheDaemonWasStartedFrom() {
+        assertTrue("EXE" in RemoteScripts.probe())
+        val out = "P \nPL /opt/hmi/ID5/data/ro/Plugins/NbtAad\nP /net/hu-omap\nPL /net/hu-omap/opt/hmi/ID5/data/ro/Plugins/NbtAad\n" +
+            "SCAN /net/hu-omap/proc\nPID /net/hu-omap/proc 4711\nEXE /net/hu-omap/proc 4711 /fs/sda0/opt/someone-elses/nbt-aad-v2\n"
+        val scan = RemoteScripts.parseForeign(out)
+        assertEquals("/opt/hmi/ID5/data/ro/Plugins/NbtAad", scan.plugin)
+        assertEquals(1, scan.exes.size)
+        val e = scan.exes.single()
+        assertEquals(4711, e.pid)
+        assertEquals("/fs/sda0/opt/someone-elses/nbt-aad-v2", e.path)
+        // the process list still reads as before
+        assertEquals(listOf(4711), RemoteScripts.parseProc(out).onHuOmap)
+        // from this processor the other one is /net/hu-omap
+        assertEquals(
+            listOf("/net/hu-omap/fs/sda0/opt/someone-elses/nbt-aad-v2", "/fs/sda0/opt/someone-elses/nbt-aad-v2"),
+            RemoteScripts.exeCandidates(e),
+        )
+        assertEquals(listOf("/opt/x/nbt-aad", "/net/hu-omap/opt/x/nbt-aad"), RemoteScripts.exeCandidates(RemoteScripts.SeenExe("/proc", 1, "/opt/x/nbt-aad")))
+        assertTrue(RemoteScripts.parseForeign("P \nSCAN /proc\n").let { it.plugin == null && it.exes.isEmpty() })
+        assertTrue(RemoteScripts.exeCandidates(RemoteScripts.SeenExe("/proc", 1, "/opt/a b/nbt-aad")).isEmpty())
+    }
+
+    @Test
+    fun theFirstCandidateThatIsAFileIsTheDaemon() {
+        assumeTrue(File("/bin/sh").canExecute())
+        val root = File.createTempFile("nbt-aad-exe", "").also { it.delete() }
+        try {
+            val real = File(root, "fs/sda0/opt/x/nbt-aad").also { it.parentFile.mkdirs(); it.writeText("daemon") }
+            RemoteScripts.pathFix = ""
+            val out = run(RemoteScripts.resolveExe(listOf(File(root, "nope/nbt-aad").path, real.path)))
+            assertEquals(real.path, RemoteScripts.parseExeFile(out))
+            assertEquals(null, RemoteScripts.parseExeFile(run(RemoteScripts.resolveExe(listOf(File(root, "nope/nbt-aad").path)))))
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun anUnfamiliarInstallCanBeRemovedOnlyWhenTheDaemonIsKnown() {
+        val running = RemoteScripts.ForeignInstall("/opt/hmi/ID5/data/ro/Plugins/NbtAad", "/fs/sda0/opt/x/nbt-aad", "/net/hu-omap/fs/sda0/opt/x/nbt-aad")
+        assertTrue(running.manageable)
+        assertEquals("/net/hu-omap/fs/sda0/opt/x", running.dir)
+        assertEquals("nbt-aad", running.exe)
+        assertTrue(running.same(RemoteScripts.ForeignInstall(running.plugin, running.seen, running.file)))
+        assertFalse(running.same(RemoteScripts.ForeignInstall(running.plugin, running.seen, "/opt/y/nbt-aad")))
+        val stopped = RemoteScripts.ForeignInstall("/opt/hmi/ID5/data/ro/Plugins/NbtAad", null, null)
+        assertFalse(stopped.manageable)
+        val notes = HeadUnit.unfamiliarNote(running) to HeadUnit.unfamiliarNote(stopped)
+        assertTrue("/fs/sda0/opt/x/nbt-aad" in notes.first && "does not manage" in notes.first && HeadUnit.SURE in notes.first)
+        assertTrue("cannot remove it either" in notes.second && HeadUnit.SURE !in notes.second)
+        assertEquals(notes.first, HeadUnit.UnfamiliarLayout(running).message)
+    }
+
+    @Test
+    fun onlyTheWordsAreAConfirmation() {
+        assertTrue(HeadUnit.isSure("I am sure"))
+        assertTrue(HeadUnit.isSure("  i AM  sure "))
+        assertFalse(HeadUnit.isSure(""))
+        assertFalse(HeadUnit.isSure("I am"))
+        assertFalse(HeadUnit.isSure("yes"))
+        assertFalse(HeadUnit.isSure("I am sure."))
+    }
 }

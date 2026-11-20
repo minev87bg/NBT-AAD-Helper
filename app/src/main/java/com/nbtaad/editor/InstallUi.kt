@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nbtaad.editor.experimental.ExperimentalController
 import com.nbtaad.editor.install.Described
+import com.nbtaad.editor.install.HeadUnit
 import com.nbtaad.editor.install.InstallController
 import com.nbtaad.editor.install.InstalledCheck
 import com.nbtaad.editor.install.Kind
@@ -833,6 +834,16 @@ private fun UninstallDialog(inst: InstallController) {
                     plan == null -> Unit
                     plan.nothing -> Text("Nothing of NBT-AAD was found in /opt/aa. There is nothing to remove.", fontSize = 13.sp)
                     else -> {
+                        if (plan.foreign != null) {
+                            Text("Unfamiliar layout", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Amber)
+                            Text(
+                                "Android Auto is not installed the way this app (or NBTApps) installs it. For safety the app " +
+                                    "does not manage such installs. The best way is to remove it with the tool that installed " +
+                                    "it last. If you are sure, this app removes only what is listed below.",
+                                fontSize = 12.sp,
+                                modifier = Modifier.padding(top = 4.dp, bottom = 10.dp),
+                            )
+                        }
                         Text(
                             "This is what the app found and would do. It stops Android Auto first.",
                             fontSize = 13.sp,
@@ -857,6 +868,15 @@ private fun UninstallDialog(inst: InstallController) {
                             Text("Not part of NBT-AAD, left alone:", fontSize = 12.sp, color = soft, modifier = Modifier.padding(top = 10.dp))
                             for (f in plan.left) Text(f, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
                         }
+                        if (plan.foreign != null) {
+                            OutlinedTextField(
+                                value = inst.uninstallSure,
+                                onValueChange = { inst.uninstallSure = it },
+                                label = { Text("Type ${HeadUnit.SURE} to continue") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                            )
+                        }
                         Text(
                             "Afterwards restart the head unit. A firewall rule that an older install added with pf_aa is not " +
                                 "touched (it goes away when the head unit restarts or is reset).",
@@ -869,7 +889,8 @@ private fun UninstallDialog(inst: InstallController) {
             }
         },
         confirmButton = {
-            val ready = !inst.uninstallBusy && plan != null && !plan.nothing && inst.uninstallProblem == null
+            val ready = !inst.uninstallBusy && plan != null && !plan.nothing && inst.uninstallProblem == null &&
+                (plan.foreign == null || HeadUnit.isSure(inst.uninstallSure))
             TextButton(onClick = { inst.uninstall() }, enabled = ready) { Text("Uninstall", color = if (ready) Red else Color.Unspecified) }
         },
         dismissButton = { TextButton(onClick = { inst.askUninstall = false }) { Text(if (plan == null || plan.nothing || inst.uninstallProblem != null) "Close" else "Cancel") } },
