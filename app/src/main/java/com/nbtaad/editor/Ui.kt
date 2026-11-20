@@ -12,6 +12,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
@@ -20,12 +22,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
@@ -653,14 +657,7 @@ private fun OptionRow(
                 opt.default != null -> "(not set, default ${opt.default})"
                 else -> "(not set)"
             }
-            OutlinedTextField(
-                value = value ?: "",
-                onValueChange = { onChange(it) },
-                singleLine = true,
-                textStyle = TextStyle(fontSize = 14.sp),
-                placeholder = { Text(ph, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                modifier = Modifier.fillMaxWidth(),
-            )
+            CompactField(value ?: "", { onChange(it) }, ph, Modifier.fillMaxWidth())
         } else {
             Box {
                 OutlinedButton(onClick = { menu = true }, modifier = Modifier.fillMaxWidth()) {
@@ -691,14 +688,7 @@ private fun OptionRow(
                 }
             }
             if (isCustomValue) {
-                OutlinedTextField(
-                    value = value ?: "",
-                    onValueChange = { onChange(it) },
-                    singleLine = true,
-                    textStyle = TextStyle(fontSize = 14.sp),
-                    placeholder = { Text("Type a value") },
-                    modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
-                )
+                CompactField(value ?: "", { onChange(it) }, "Type a value", Modifier.fillMaxWidth().padding(top = 4.dp))
             }
         }
 
@@ -734,6 +724,37 @@ private fun OptionRow(
             )
         }
     }
+}
+
+/**
+ * The outlined text field of the stock library, but only as tall as its line needs (the stock one is 56 dp, which is a
+ * good part of a row of the settings list), so that more settings are seen at once.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CompactField(value: String, onChange: (String) -> Unit, placeholder: String, modifier: Modifier = Modifier) {
+    val source = remember { MutableInteractionSource() }
+    BasicTextField(
+        value = value,
+        onValueChange = onChange,
+        singleLine = true,
+        textStyle = TextStyle(fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface),
+        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+        interactionSource = source,
+        modifier = modifier,
+        decorationBox = { inner ->
+            OutlinedTextFieldDefaults.DecorationBox(
+                value = value,
+                innerTextField = inner,
+                enabled = true,
+                singleLine = true,
+                visualTransformation = VisualTransformation.None,
+                interactionSource = source,
+                placeholder = { Text(placeholder, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+            )
+        },
+    )
 }
 
 @Composable
