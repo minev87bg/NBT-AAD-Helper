@@ -46,9 +46,9 @@ fun ContributeScreen(vm: MainViewModel) {
                                 "What is sent",
                                 "Nothing is sent by the app. It makes one zip on this phone from the files you tick, and " +
                                     "you attach it to the issue yourself, on GitHub.\n\n" +
-                                    "Before a log goes into the zip, the WiFi password of the car's hotspot (the daemon " +
-                                    "writes it into its log) and the VIN are hidden. The zip also holds about.txt: " +
-                                    "this app's version, the phone, and what was hidden.\n\n" +
+                                    "Before a log goes into the zip, the WiFi password of the car's hotspot, the VIN and the " +
+                                    "car's GPS positions (the daemon writes all three into its log) are hidden. The zip " +
+                                    "also holds about.txt: this app's version, the phone, and what was hidden.\n\n" +
                                     "The daemon's logs are in the head unit's memory: they are gone after a reboot, so " +
                                     "pack them before you restart the car. Reading is slow (about 30 KB/s).",
                                 mono = false,
@@ -203,7 +203,7 @@ internal fun PackCard(c: ContributeController) {
                         Text("PACK THE LOGS")
                     }
                     Text(
-                        "Reads the ticked files, hides the WiFi password and the VIN, and makes the zip.",
+                        "Reads the ticked files, hides the WiFi password, the VIN and the GPS positions, and makes the zip.",
                         fontSize = 11.sp,
                         color = soft,
                         modifier = Modifier.padding(top = 4.dp),
@@ -225,7 +225,8 @@ private fun PackedBlock(c: ContributeController, p: PackedLogs, save: (String) -
         color = soft,
     )
     Text(
-        "Hidden: ${p.passwords} WiFi password${if (p.passwords == 1) "" else "s"}, ${p.vins} VIN${if (p.vins == 1) "" else "s"}.",
+        "Hidden: ${p.passwords} WiFi password${if (p.passwords == 1) "" else "s"}, ${p.vins} VIN${if (p.vins == 1) "" else "s"}, " +
+            "${p.positions} GPS position${if (p.positions == 1) "" else "s"}.",
         fontSize = 12.sp,
         color = Green,
         modifier = Modifier.padding(top = 2.dp),

@@ -19,6 +19,7 @@ class PackInfo(
     val forPage: String?,
     val passwords: Int,
     val vins: Int,
+    val positions: Int = 0,
 )
 
 /** The zip with the logs. Pure (java.util.zip only), so it is tested. */
@@ -50,7 +51,8 @@ object LogPack {
         info.forPage?.let { appendLine("For: $it") }
         appendLine(
             "Hidden before packing: ${info.passwords} WiFi password${if (info.passwords == 1) "" else "s"}, " +
-                "${info.vins} VIN${if (info.vins == 1) "" else "s"} (VINs are kept as WBA…3076).",
+                "${info.vins} VIN${if (info.vins == 1) "" else "s"} (VINs are kept as WBA…3076), " +
+                "${info.positions} GPS position${if (info.positions == 1) "" else "s"}.",
         )
         appendLine()
         appendLine("Files:")

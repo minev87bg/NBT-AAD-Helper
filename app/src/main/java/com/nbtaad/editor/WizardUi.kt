@@ -94,7 +94,7 @@ fun WizardScreen(vm: MainViewModel) {
                                 InfoBalloon(
                                     "Prepare logs",
                                     "Nothing is sent by the app. It makes one zip from the head unit's logs, with the WiFi " +
-                                        "password and the VIN hidden, saves it in Downloads and opens the page at its " +
+                                        "password, the VIN and the GPS positions hidden, saves it in Downloads and opens the page at its " +
                                         "comment box, where you attach it.\n\nThe logs are in the head unit's memory, so " +
                                         "Android Auto must keep running until they are packed.",
                                     mono = false,
@@ -325,7 +325,7 @@ private fun LogsStep(vm: MainViewModel) {
     val c = vm.contribute
     StepTitle("Pick the logs")
     Text(
-        "The ticked files go into one zip, with the WiFi password and the VIN hidden.",
+        "The ticked files go into one zip, with the WiFi password, the VIN and the GPS positions hidden.",
         fontSize = 12.sp,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(top = 4.dp),

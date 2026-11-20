@@ -132,4 +132,69 @@ class ContributeLogicTest {
         assertEquals(listOf("a.log", "a-2.log", "A-3.log", "b"), LogPack.uniqueNames(listOf("a.log", "a.log", "A.log", "b")))
         assertEquals("nbt-aad-logs-20261119-2301.zip", LogPack.zipName(now))
     }
+
+    // ---- hiding where the car is ----
+
+    @Test
+    fun theCarsGpsFixLinesLoseTheirCoordinates() {
+        val log = "[GPS] car GPS fix: 48.137154, 11.576124 (UTC 2026-11-19 10:00:00)\n" +
+            "[GPS] fix #3 10:00:01 48.137154, 11.576124 fix=3 hdop=9 vdop=11 speed=0 heading=120 height=520\n" +
+            "[GPS] fix #4 -33.868820, 151.209290 (26-byte payload, no extra fields)\n"
+        val m = LogMask.mask(log)
+        assertEquals(3, m.positions)
+        assertFalse(m.text.contains("48.1371"))
+        assertFalse(m.text.contains("11.5761"))
+        assertFalse(m.text.contains("33.8688"))
+        assertFalse(m.text.contains("151.2092"))
+        assertTrue(m.text.contains("[GPS] car GPS fix: <position hidden> (UTC 2026-11-19 10:00:00)"))
+        assertTrue(m.text.contains("[GPS] fix #3 10:00:01 <position hidden> fix=3 hdop=9 vdop=11 speed=0"))
+        assertTrue(m.any)
+    }
+
+    @Test
+    fun theLocationSentToThePhoneIsHiddenToo() {
+        val log = "[AASession] >>> Sensor LOCATION event #7 (48.137154, 11.576124, accuracy 5.0 m, speed 3.20 m/s, bearing 120.0)\n"
+        val m = LogMask.mask(log)
+        assertEquals(1, m.positions)
+        assertTrue(m.text.contains("Sensor LOCATION event #7 (<position hidden>, accuracy 5.0 m, speed 3.20 m/s, bearing 120.0)"))
+    }
+
+    @Test
+    fun theMostLogsPositionBytesAreHiddenButTheOtherMessagesStay() {
+        val gnss = "[MOSTLOG] +1234 notification tx=0 var=0/0 2023->0100 52/00 fkt=440 Status(C) tag=0 len=26: 01 02 03 04 05 ..."
+        val other = "[MOSTLOG] +1300 notification tx=0 var=0/0 2023->0100 05/00 fkt=621 Status(C) tag=0 len=2: 00 10"
+        val m = LogMask.mask("$gnss\n$other\n")
+        assertEquals(1, m.positions)
+        assertFalse(m.text.contains("01 02 03 04"))
+        assertTrue(m.text.contains("52/00 fkt=440 Status(C) tag=0 len=26: <position hidden>"))
+        assertTrue(m.text.contains(other))
+    }
+
+    @Test
+    fun otherNumbersAndOtherGpsLinesAreLeftAlone() {
+        val log = "[GPS] heading message #5 raw=123 quality=0x0001, longest gap 1000 ms\n" +
+            "[GPS] status #2 used=9 receiver=2 quality=3 hdop=9 err=0/0 speed=0 time=1\n" +
+            "[VideoManager] geometry 12.5, 13.25 of the surface\n" +
+            "Build: v1.9.112 (Nov 18 2026 12:00:00)\n"
+        val m = LogMask.mask(log)
+        assertEquals(0, m.positions)
+        assertEquals(log, m.text)
+        assertFalse(m.any)
+    }
+
+    @Test
+    fun hidingPositionsTwiceChangesNothingTheSecondTime() {
+        val once = LogMask.mask("[GPS] car GPS fix: 48.137154, 11.576124 (UTC 2026-11-19 10:00:00)\n")
+        val twice = LogMask.mask(once.text)
+        assertEquals(once.text, twice.text)
+        assertEquals(0, twice.positions)
+    }
+
+    @Test
+    fun theZipsAboutFileCountsThePositions() {
+        val now = ZonedDateTime.of(2026, 11, 19, 23, 1, 0, 0, ZoneId.of("Europe/Sofia"))
+        val info = PackInfo("app", "phone", now, null, null, 1, 2, 3)
+        val about = LogPack.about(info, emptyList())
+        assertTrue(about, about.contains("3 GPS positions"))
+    }
 }

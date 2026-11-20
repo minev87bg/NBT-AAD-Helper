@@ -31,6 +31,7 @@ class PackedLogs(
     val bytes: ByteArray,
     val passwords: Int,
     val vins: Int,
+    val positions: Int,
     /** Files that could not be read: "name: why". */
     val skipped: List<String>,
     val files: List<String>,
@@ -192,15 +193,17 @@ class ContributeController(
                         )
                     }
                 }
-                packMessage = "Hiding the WiFi password and the VIN…"
+                packMessage = "Hiding the WiFi password, the VIN and the GPS positions…"
                 var passwords = 0
                 var vins = 0
+                var positions = 0
                 val entries = ArrayList<PackEntry>()
                 val skipped = ArrayList<String>()
                 fun add(name: String, bytes: ByteArray, note: String = "") {
                     val m = LogMask.mask(String(bytes, Charsets.UTF_8))
                     passwords += m.passwords
                     vins += m.vins
+                    positions += m.positions
                     // a file with nothing to hide goes in as it is, byte for byte
                     entries += PackEntry(name, if (m.any) m.text.toByteArray(Charsets.UTF_8) else bytes, note)
                 }
@@ -213,11 +216,11 @@ class ContributeController(
                 val now = ZonedDateTime.now()
                 val info = PackInfo(
                     AppLog.versionText(), AppLog.deviceText(), now, headUnitVersion(),
-                    target?.let { targetText() }, passwords, vins,
+                    target?.let { targetText() }, passwords, vins, positions,
                 )
                 val zip = LogPack.zip(entries, info)
-                val made = PackedLogs(LogPack.zipName(now), zip, passwords, vins, skipped, entries.map { it.name })
-                AppLog.i("Contribute", "Packed ${entries.size} files into ${zip.size} bytes; hid $passwords passwords and $vins VINs; skipped: ${skipped.ifEmpty { "none" }}")
+                val made = PackedLogs(LogPack.zipName(now), zip, passwords, vins, positions, skipped, entries.map { it.name })
+                AppLog.i("Contribute", "Packed ${entries.size} files into ${zip.size} bytes; hid $passwords passwords, $vins VINs and $positions positions; skipped: ${skipped.ifEmpty { "none" }}")
                 packed = made
                 // the zip goes straight into Downloads, where the browser's file picker finds it: no extra step for the person
                 if (saveToDownloads(made)) {
