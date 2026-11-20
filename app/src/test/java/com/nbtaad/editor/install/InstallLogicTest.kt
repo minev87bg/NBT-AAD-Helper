@@ -486,7 +486,7 @@ class InstallLogicTest {
         assertFalse(body.contains("\n\n\n"))
         // the notes are broken at spaces, a list item's next line sits under its text, a long link stays whole
         for (l in body.lines()) assertTrue(l, l.length <= 40 || !l.contains(' '))
-        assertTrue(body.contains("\n  go on") || body.contains("\n  has to go on") || body.contains("\n  to go on"))
+        assertTrue(body, body.contains("- A list item that is longer than the\n  width of the window and has to go on\n"))
         assertTrue(body.endsWith("v1.9.116"))
         assertTrue(ReleaseLogic.infoText(r.copy(notes = "  ", title = "v1.9.116", prerelease = false), "x").endsWith("(none written)"))
     }
