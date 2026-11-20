@@ -1,4 +1,4 @@
-# NBT AAD Helper
+# NBT AAD Tool
 
 Android app that edits `/opt/aa/nbt-aad.env` on a BMW / Toyota Supra NBT Evo head unit running
 [NBT-AAD](https://github.com/Sq00ky/Supra-iDrive6-Android-Auto) (native Android Auto).
@@ -6,7 +6,7 @@ Android app that edits `/opt/aa/nbt-aad.env` on a BMW / Toyota Supra NBT Evo hea
 Status: tested in a car for detection, reset, read, save, install and going back. Versions 1.0.16 to 1.0.18 (every reset scans for the car first, SSH actions look for the car again, new page 2, Skip, app log) have not been tried in a car yet. Experimental is built (v1.0.20; v1.0.21 adds GitHub-style formatting and an AI summary), CONTRIBUTE is announced but not built.
 
 ## Get the APK
-Every successful build is published as a release (Releases page, newest on top, `NBT-AAD-Helper-v1.0.N.apk`).
+Every successful build is published as a release (Releases page, newest on top, `NBT-AAD-Tool-v1.0.N.apk`).
 Download the APK on the phone, install it and allow "install unknown apps". The same file is also the artifact
 `NbtAadEditor-debug-apk` of the "Build APK" run (Actions tab).
 

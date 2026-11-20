@@ -54,14 +54,14 @@ fun AppLog.start(ctx: Context) {
     }
 }
 
-/** "nbt-aad-helper-log-20261119-0140.txt" */
+/** "nbt-aad-tool-log-20261119-0140.txt" */
 fun AppLog.exportName(): String =
-    "nbt-aad-helper-log-" + ZonedDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmm")) + ".txt"
+    "nbt-aad-tool-log-" + ZonedDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmm")) + ".txt"
 
 /** Writes a short header and the whole log to [uri] (a file the person chose). Returns the number of bytes. */
 fun AppLog.saveTo(ctx: Context, uri: Uri): Int {
     val header = buildString {
-        appendLine("NBT AAD Helper log")
+        appendLine("NBT AAD Tool log")
         appendLine("App: $appVersion")
         appendLine("Phone: ${device()}")
         appendLine("Saved: ${ZonedDateTime.now().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)}")

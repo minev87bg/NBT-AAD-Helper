@@ -43,7 +43,7 @@ object LogPack {
     }
 
     fun about(info: PackInfo, entries: List<PackEntry>): String = buildString {
-        appendLine("NBT AAD Helper: logs for the project")
+        appendLine("NBT AAD Tool: logs for the project")
         appendLine("App: ${info.app}")
         appendLine("Phone: ${info.phone}")
         appendLine("Packed: ${info.packed.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)}")

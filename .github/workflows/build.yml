@@ -60,12 +60,12 @@ jobs:
           fi
 
       - name: Name the APK
-        run: cp app/build/outputs/apk/debug/app-debug.apk "NBT-AAD-Helper-v$APP_VERSION_NAME.apk"
+        run: cp app/build/outputs/apk/debug/app-debug.apk "NBT-AAD-Tool-v$APP_VERSION_NAME.apk"
 
       - uses: actions/upload-artifact@v4
         with:
           name: NbtAadEditor-debug-apk
-          path: NBT-AAD-Helper-v*.apk
+          path: NBT-AAD-Tool-v*.apk
 
       # The app asks GitHub for the latest release at start-up (UpdateLogic.LATEST_URL).
       - name: Publish release
@@ -74,7 +74,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="v$APP_VERSION_NAME"
-          FILE="NBT-AAD-Helper-v$APP_VERSION_NAME.apk"
+          FILE="NBT-AAD-Tool-v$APP_VERSION_NAME.apk"
           git log -1 --format=%B | grep -v -E '^(Co-Authored-By|Claude-Session):' > notes.txt
           if gh release view "$TAG" > /dev/null 2>&1; then
             gh release upload "$TAG" "$FILE" --clobber

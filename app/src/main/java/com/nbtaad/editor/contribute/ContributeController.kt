@@ -337,7 +337,7 @@ class ContributeController(
                     val b = r.bytes
                     if (b == null) skipped += "${r.name}: ${r.problem}" else add(r.name, b)
                 }
-                if (forApp) add("nbt-aad-helper-app-log.txt", AppLog.text().toByteArray(Charsets.UTF_8), "the phone app's own log")
+                if (forApp) add("nbt-aad-tool-app-log.txt", AppLog.text().toByteArray(Charsets.UTF_8), "the phone app's own log")
                 if (entries.isEmpty()) throw IOException("None of the files could be read.")
                 val now = ZonedDateTime.now()
                 val info = PackInfo(
