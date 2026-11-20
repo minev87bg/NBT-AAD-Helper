@@ -12,9 +12,10 @@ No laptop, no USB stick: the app talks to the head unit over WiFi (SSH).
 | **Car connection** | Finds the head unit, joins the car's WiFi, and tells you what to do when the connection is lost. |
 | **Updates itself** | Checks GitHub for a newer version at start-up. |
 
-Works with Android Auto installed by hand (`/opt/aa`, as in the project's guide) and with Android Auto installed by
-[NBTApps](https://github.com/tom-pryor/nbtapps): settings, logs and the version check work with both; installing
-and going back are for the hand install (with NBTApps, update in NBTApps).
+The app was built and tested with Android Auto installed by hand (`/opt/aa`, as in the project's guide). Android Auto
+installed by [NBTApps](https://github.com/tom-pryor/nbtapps) is recognised too (settings, logs and the version check;
+new, and not yet confirmed on a car). Installing and going back are not done over an NBTApps install: update it in
+NBTApps.
 
 Status: **beta**. Written and tested by one person on one car; reports and logs are welcome in
 [Issues](https://github.com/minev87bg/NBT-AAD-Helper/issues). This is an unofficial tool: it is not made by or
