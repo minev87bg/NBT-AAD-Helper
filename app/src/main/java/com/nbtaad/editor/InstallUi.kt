@@ -331,12 +331,27 @@ fun InstallScreen(vm: MainViewModel) {
                         modifier = Modifier.padding(top = 4.dp),
                     )
                 }
+                Spacer(Modifier.height(20.dp))
+                Text("Uninstall", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "Takes Android Auto off the head unit again, so that it is clean for another installer. It first shows " +
+                        "what would be removed, and nothing changes until you confirm.",
+                    fontSize = 12.sp,
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = { inst.openUninstall() },
+                    enabled = !inst.working,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Uninstall Android Auto…", color = if (inst.working) Color.Unspecified else Red) }
             }
         }
     }
 
     inst.view?.takeIf { inst.askInstall }?.let { PlanDialog(inst, it) }
     if (inst.askRevert) RevertDialog(inst)
+    if (inst.askUninstall) UninstallDialog(inst)
     inst.job?.let { RunDialog(vm, inst, it) }
     inst.diagText?.let { DiagDialog(inst, it) }
     // CHANGE may find an unfinished file of the last session and asks about it, as the choice page does
@@ -799,6 +814,68 @@ private fun RevertDialog(inst: InstallController) {
     )
 }
 
+/** Shows what an uninstall would remove (read from the head unit; nothing has changed yet) and asks. */
+@Composable
+private fun UninstallDialog(inst: InstallController) {
+    val plan = inst.uninstallPlan
+    val soft = MaterialTheme.colorScheme.onSurfaceVariant
+    AlertDialog(
+        onDismissRequest = { inst.askUninstall = false },
+        title = { Text("Uninstall Android Auto?") },
+        text = {
+            Column(Modifier.heightIn(max = 440.dp).verticalScroll(rememberScrollState())) {
+                when {
+                    inst.uninstallBusy -> {
+                        Text("Looking at the head unit…", fontSize = 13.sp)
+                        LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 10.dp))
+                    }
+                    inst.uninstallProblem != null -> Text(inst.uninstallProblem ?: "", fontSize = 13.sp, color = Red)
+                    plan == null -> Unit
+                    plan.nothing -> Text("Nothing of NBT-AAD was found in /opt/aa. There is nothing to remove.", fontSize = 13.sp)
+                    else -> {
+                        Text(
+                            "This is what the app found and would do. It stops Android Auto first.",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        if (plan.moves.isNotEmpty()) {
+                            Text("Moved aside, not deleted (iDrive may have it loaded):", fontSize = 12.sp, color = soft, modifier = Modifier.padding(top = 10.dp))
+                            for ((from, to) in plan.moves) Text("$from\n  → $to", fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                        }
+                        val gone = plan.removes + (if (inst.uninstallKeepEnv) emptyList() else plan.envFiles)
+                        if (gone.isNotEmpty()) {
+                            Text("Removed:", fontSize = 12.sp, color = soft, modifier = Modifier.padding(top = 10.dp))
+                            for (f in gone) Text(f, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                        }
+                        if (plan.envFiles.isNotEmpty() || plan.kept.isNotEmpty()) {
+                            CheckLine(
+                                inst.uninstallKeepEnv, { inst.uninstallKeepEnv = it },
+                                "Keep my settings (nbt-aad.env and its backups)",
+                            )
+                        }
+                        if (plan.left.isNotEmpty()) {
+                            Text("Not part of NBT-AAD, left alone:", fontSize = 12.sp, color = soft, modifier = Modifier.padding(top = 10.dp))
+                            for (f in plan.left) Text(f, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                        }
+                        Text(
+                            "Afterwards restart the head unit. A firewall rule that an older install added with pf_aa is not " +
+                                "touched (it goes away when the head unit restarts or is reset).",
+                            fontSize = 12.sp,
+                            color = soft,
+                            modifier = Modifier.padding(top = 10.dp),
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            val ready = !inst.uninstallBusy && plan != null && !plan.nothing && inst.uninstallProblem == null
+            TextButton(onClick = { inst.uninstall() }, enabled = ready) { Text("Uninstall", color = if (ready) Red else Color.Unspecified) }
+        },
+        dismissButton = { TextButton(onClick = { inst.askUninstall = false }) { Text(if (plan == null || plan.nothing || inst.uninstallProblem != null) "Close" else "Cancel") } },
+    )
+}
+
 @Composable
 private fun DiagDialog(inst: InstallController, text: String) {
     val clip = LocalClipboardManager.current
@@ -884,7 +961,11 @@ private fun RunDialog(vm: MainViewModel, inst: InstallController, d: RunState) {
     val logMax = (bodyMax - 170.dp).coerceAtLeast(120.dp)
     val isDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
     val successContainer = if (isDark) Color(0xFF1B3B20) else Color(0xFFE8F5E9)
-    val what = if (d.kind == RunKind.INSTALL) "Install" else "Going back"
+    val what = when (d.kind) {
+        RunKind.INSTALL -> "Install"
+        RunKind.REVERT -> "Going back"
+        RunKind.UNINSTALL -> "Uninstall"
+    }
     val close = {
         inst.closeRun(readAgain = !vm.resetting)
         vm.resetNote = null
@@ -922,7 +1003,13 @@ private fun RunDialog(vm: MainViewModel, inst: InstallController, d: RunState) {
                         Text(d.headline, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Green)
                         for (m in d.notes) Text(m, fontSize = 12.sp, color = Amber, modifier = Modifier.padding(top = 4.dp))
                         Text(
-                            if (d.pluginChanged) "Restart the head unit to load the new plugin." else "Restarting the head unit is recommended.",
+                            when {
+                                d.kind == RunKind.UNINSTALL ->
+                                    "Restart the head unit: the Android Auto entry leaves the Media/Radio menu then. " +
+                                        "The plugin folder was moved aside, not deleted, because iDrive has it loaded."
+                                d.pluginChanged -> "Restart the head unit to load the new plugin."
+                                else -> "Restarting the head unit is recommended."
+                            },
                             fontSize = 13.sp,
                             modifier = Modifier.padding(top = 10.dp),
                         )

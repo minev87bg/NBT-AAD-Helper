@@ -34,7 +34,7 @@ class PackageView(
     val fromProject: Boolean get() = source == SourceKind.RELEASE
 }
 
-enum class RunKind { INSTALL, REVERT }
+enum class RunKind { INSTALL, REVERT, UNINSTALL }
 enum class RunStatus { RUNNING, OK, FAIL }
 class RunLine(val text: String, val level: Level)
 /** The log of a run, and how it ended: [headline] is the one line for the summary, [notes] what deserves a second look. */
@@ -88,6 +88,14 @@ class InstallController(
     // dialogs and the job
     var askInstall by mutableStateOf(false)
     var askRevert by mutableStateOf(false)
+
+    // the uninstall question: the dialog is open ([askUninstall]); first it looks at the head unit ([uninstallBusy]), then
+    // it shows what would go ([uninstallPlan]) or why nothing can be done ([uninstallProblem])
+    var askUninstall by mutableStateOf(false)
+    var uninstallBusy by mutableStateOf(false)
+    var uninstallPlan by mutableStateOf<RemoteScripts.UninstallPlan?>(null)
+    var uninstallProblem by mutableStateOf<String?>(null)
+    var uninstallKeepEnv by mutableStateOf(false)
     var revertDaemon by mutableStateOf(true)
     var revertPlugin by mutableStateOf(false)
     var diagText by mutableStateOf<String?>(null)
@@ -470,6 +478,55 @@ class InstallController(
                 finish(RunStatus.OK, headline, pluginChanged = out.plugin)
             } catch (e: Exception) {
                 AppLog.e("Revert", "Go back failed", e)
+                addLine(friendlyError(e), Level.ERROR)
+                finish(RunStatus.FAIL, friendlyError(e))
+            }
+        }
+    }
+
+    /** Opens the uninstall question and looks at what is on the head unit (read only; nothing changes yet). */
+    fun openUninstall() {
+        if (working) return
+        askUninstall = true
+        uninstallBusy = true
+        uninstallPlan = null
+        uninstallProblem = null
+        uninstallKeepEnv = false
+        scope.launch(Dispatchers.IO) {
+            try {
+                NetworkBinder.bindToLocalNetwork(ctx)
+                val plan = runOnHeadUnit(host, rescan, onRescan = { }, whyNot = problem) { HeadUnit.uninstallPlan(it) }
+                AppLog.i("Uninstall", "Plan: ${plan.moves.size} moves, ${plan.removes.size} removed, ${plan.envFiles.size} settings files, ${plan.left.size} left alone")
+                uninstallPlan = plan
+            } catch (e: Exception) {
+                AppLog.e("Uninstall", "Looking at the head unit failed", e)
+                uninstallProblem = friendlyError(e)
+            } finally {
+                uninstallBusy = false
+            }
+        }
+    }
+
+    fun uninstall() {
+        if (working) return
+        val keep = uninstallKeepEnv
+        askUninstall = false
+        AppLog.i("Uninstall", "Uninstall started, keeping nbt-aad.env: $keep")
+        job = RunState(RunKind.UNINSTALL, emptyList(), RunStatus.RUNNING)
+        scope.launch(Dispatchers.IO) {
+            try {
+                NetworkBinder.bindToLocalNetwork(ctx)
+                val rep = reporter(recording = false)
+                val out = runOnHeadUnit(
+                    host, rescan,
+                    onRescan = { addLine(lookingNote(), Level.WARN) },
+                    whyNot = problem,
+                ) { HeadUnit.uninstall(it, rep, keep) }
+                val headline = "Android Auto was removed from the head unit."
+                addLine(headline, if (out.problems.isEmpty()) Level.OK else Level.WARN)
+                finish(RunStatus.OK, headline, out.problems, pluginChanged = out.plan.moves.isNotEmpty())
+            } catch (e: Exception) {
+                AppLog.e("Uninstall", "Uninstall failed", e)
                 addLine(friendlyError(e), Level.ERROR)
                 finish(RunStatus.FAIL, friendlyError(e))
             }

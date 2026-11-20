@@ -103,9 +103,9 @@ object RemoteScripts {
     /** Tests set this to "" to see how the scripts do with only the short PATH of the car. */
     @JvmField var pathFix: String = PATH_FIX
 
-    private fun sh(body: String, aa: String = "", pl: String = "", env: String = aa): String =
+    private fun sh(body: String, aa: String = "", pl: String = "", env: String = aa, va: String = ""): String =
         (pathFix + body.trimIndent())
-            .replace("@AA@", aa).replace("@PL@", pl).replace("@ENV@", env).replace("@HUAA@", onHuOmapPath(aa))
+            .replace("@AA@", aa).replace("@PL@", pl).replace("@ENV@", env).replace("@VA@", va).replace("@HUAA@", onHuOmapPath(aa))
             .replace('¤', '$')
 
     /** A path as the processor that runs Android Auto names it: /net/hu-omap/fs/sda0/opt/aa is /fs/sda0/opt/aa there. */
@@ -119,6 +119,7 @@ object RemoteScripts {
           echo "P ¤p"
           if [ -d "¤p/opt/aa" ]; then echo "AA ¤p/opt/aa"; fi
           if [ -d "¤p/$PLUGIN_SUBPATH" ]; then echo "PL ¤p/$PLUGIN_SUBPATH"; fi
+          if [ -d "¤p/var/opt/aa" ]; then echo "VA ¤p/var/opt/aa"; fi
           if [ -d "¤p/var/opt/nbtapp/apps/$NBTAPPS_ID" ]; then echo "NA ¤p/var/opt/nbtapp/apps/$NBTAPPS_ID"; fi
           if [ -d "¤p/var/opt/nbtapp/data/$NBTAPPS_ID" ]; then echo "ND ¤p/var/opt/nbtapp/data/$NBTAPPS_ID"; fi
         done
@@ -349,11 +350,11 @@ object RemoteScripts {
     }
 
     /** Where [locate] found what: the manual install in /opt/aa, and the folders NBTApps made (its program and its data). */
-    class Located(val aa: String?, val plugin: String?, val nbtApp: String?, val nbtData: String?)
+    class Located(val aa: String?, val plugin: String?, val nbtApp: String?, val nbtData: String?, val va: String? = null)
 
     /** Everything [locate] printed, as [Located]; each of the four is the first one found, a plugin folder next to the program first. */
     fun parseLocated(out: String): Located {
-        class Row { var aa: String? = null; var pl: String? = null; var na: String? = null; var nd: String? = null }
+        class Row { var aa: String? = null; var pl: String? = null; var na: String? = null; var nd: String? = null; var va: String? = null }
         val rows = ArrayList<Row>()
         for (raw in out.lines()) {
             val line = raw.trim()
@@ -363,12 +364,13 @@ object RemoteScripts {
                 line.startsWith("PL ") -> rows.lastOrNull()?.pl = line.substring(3).trim()
                 line.startsWith("NA ") -> rows.lastOrNull()?.na = line.substring(3).trim()
                 line.startsWith("ND ") -> rows.lastOrNull()?.nd = line.substring(3).trim()
+                line.startsWith("VA ") -> rows.lastOrNull()?.va = line.substring(3).trim()
             }
         }
         val (aa, pl) = parseLocate(out)
         // the data folder of the same prefix as the program folder, when there is one
         val na = rows.firstOrNull { it.na != null }
-        return Located(aa, pl, na?.na, na?.nd ?: rows.firstNotNullOfOrNull { it.nd })
+        return Located(aa, pl, na?.na, na?.nd ?: rows.firstNotNullOfOrNull { it.nd }, rows.firstNotNullOfOrNull { it.va })
     }
 
     /**
@@ -463,6 +465,115 @@ object RemoteScripts {
             "exit 0",
         aa, pl ?: "",
     )
+
+    /**
+     * What an uninstall of a hand install does, and with [apply] false only says (it changes nothing): the plugin folder is
+     * moved aside as /opt/aa/NbtAad.old (iDrive may have it loaded, so it is not deleted under it, and a folder parked
+     * there by an earlier uninstall stays until a new plugin folder takes its place; an installer that looks
+     * for an app installed by hand takes a folder parked like that for clean), the daemon and its leftovers are removed,
+     * nbt-aad.env and its backups too unless [keepEnv], and the files the iDrive menu's checkboxes keep in /var/opt/aa.
+     * Only names this app knows are touched; anything else in /opt/aa is reported as left. Output lines: MV, RM, RMENV,
+     * KEEP, LEFT, REMOUNT, FAIL and DONE (see [parseUninstall]).
+     */
+    fun uninstall(aa: String, pl: String?, va: String?, keepEnv: Boolean, apply: Boolean): String {
+        // it deletes: never anything but the folders it was made for
+        require(aa.endsWith("/opt/aa")) { "not the NBT-AAD folder: $aa" }
+        require(pl == null || pl.endsWith("/Plugins/NbtAad")) { "not the plugin folder: $pl" }
+        require(va == null || va.endsWith("/var/opt/aa")) { "not the settings folder: $va" }
+        val body = (if (apply) REMOUNT_PART + "\n" else "") +
+            "apply=" + (if (apply) "1" else "0") + "\nkeep=" + (if (keepEnv) "1" else "0") + "\n" +
+            """
+            cd @AA@ || { echo "FAIL aa"; exit 61; }
+            """.trimIndent() + "\n" +
+            (if (pl != null) """
+            if [ -d @PL@ ]; then
+              if [ -e NbtAad.old ]; then
+                echo "RM @AA@/NbtAad.old"
+                if [ ¤apply = 1 ]; then rm -rf NbtAad.old; fi
+              fi
+              echo "MV @PL@ @AA@/NbtAad.old"
+              if [ ¤apply = 1 ]; then
+                mv @PL@ NbtAad.old || { echo "FAIL plugin"; exit 62; }
+              fi
+            fi
+            """.trimIndent() + "\n" else "") +
+            """
+            for f in @AA@/*; do
+              if [ -e ¤f ] || [ -L ¤f ]; then
+                n=¤{f##*/}
+                case ¤n in
+                  NbtAad.old) ;;
+                  nbt-aad|nbt-aad.old|nbt-aad.new|nbt-aad.broken|nbt-aad.swap|pf_aa|NbtAad.new)
+                    echo "RM ¤f"
+                    if [ ¤apply = 1 ]; then rm -rf ¤f; fi ;;
+                  nbt-aad.env|nbt-aad.env.orig|nbt-aad.env.bak|nbt-aad.env.bak2|nbt-aad.env.bak3|nbt-aad.env.new)
+                    if [ ¤keep = 1 ]; then
+                      echo "KEEP ¤f"
+                    else
+                      echo "RMENV ¤f"
+                      if [ ¤apply = 1 ]; then rm -f ¤f; fi
+                    fi ;;
+                  *) echo "LEFT ¤f" ;;
+                esac
+              fi
+            done
+            """.trimIndent() + "\n" +
+            (if (va != null) """
+            if [ -d @VA@ ]; then
+              for f in @VA@/*; do
+                if [ -f ¤f ] || [ -L ¤f ]; then
+                  echo "RM ¤f"
+                  if [ ¤apply = 1 ]; then rm -f ¤f; fi
+                elif [ -e ¤f ]; then
+                  echo "LEFT ¤f"
+                fi
+              done
+            fi
+            """.trimIndent() + "\n" else "") +
+            "echo DONE\nexit 0"
+        return sh(body, aa, pl ?: "", va = va ?: "")
+    }
+
+    /** What [uninstall] printed. */
+    class UninstallPlan(
+        val moves: List<Pair<String, String>>,   // (from, to): a folder moved aside
+        val removes: List<String>,               // files and folders removed
+        val envFiles: List<String>,              // nbt-aad.env and its backups, removed unless kept
+        val kept: List<String>,                  // the same files, when they were asked to stay
+        val left: List<String>,                  // not known to this app: not touched
+        val remountFailed: Boolean,
+        val done: Boolean,
+        val failed: String?,
+    ) {
+        /** Nothing of NBT-AAD is on the head unit. */
+        val nothing: Boolean get() = moves.isEmpty() && removes.isEmpty() && envFiles.isEmpty() && kept.isEmpty()
+    }
+
+    fun parseUninstall(out: String): UninstallPlan {
+        val moves = ArrayList<Pair<String, String>>()
+        val removes = ArrayList<String>()
+        val env = ArrayList<String>()
+        val kept = ArrayList<String>()
+        val left = ArrayList<String>()
+        var remount = false
+        var done = false
+        var failed: String? = null
+        for (raw in out.lines()) {
+            val line = raw.trim()
+            val rest = line.substringAfter(' ', "").trim()
+            when {
+                line.startsWith("MV ") -> rest.split(Regex("\\s+")).takeIf { it.size == 2 }?.let { moves += it[0] to it[1] }
+                line.startsWith("RM ") -> removes += rest
+                line.startsWith("RMENV ") -> env += rest
+                line.startsWith("KEEP ") -> kept += rest
+                line.startsWith("LEFT ") -> left += rest
+                line == "REMOUNT failed" -> remount = true
+                line.startsWith("FAIL ") -> failed = rest
+                line == "DONE" -> done = true
+            }
+        }
+        return UninstallPlan(moves, removes, env, kept, left, remount, done, failed)
+    }
 
     /** Does the output of [prepare] or [apply] say the partition could not be made writable? */
     fun remountFailed(out: String): Boolean = out.lines().any { it.trim() == "REMOUNT failed" }
@@ -696,6 +807,8 @@ object RemoteScripts {
         33, 38 -> "the swap failed halfway and was undone"
         42 -> "the staging folder could not be made"
         43 -> "the current plugin files could not be copied"
+        61 -> "the NBT-AAD folder could not be entered"
+        62 -> "the plugin folder could not be moved aside"
         else -> "exit code $code"
     }
 }

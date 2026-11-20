@@ -45,7 +45,7 @@ object HeadUnit {
      * Where Android Auto is. [aa] is the folder of the program; [env] the folder of nbt-aad.env (the same, except for
      * NBTApps, which keeps the file in a data folder of its own); [nbtApps]: NBTApps put it there, not a person's hands.
      */
-    class Layout(val aa: String, val plugin: String?, val nbtApps: Boolean = false, val env: String = aa)
+    class Layout(val aa: String, val plugin: String?, val nbtApps: Boolean = false, val env: String = aa, val va: String? = null)
 
     /** Why this app does not install over an NBTApps install. */
     const val NBTAPPS_NOTE =
@@ -55,7 +55,7 @@ object HeadUnit {
     private fun layoutOf(out: String): Layout? {
         val loc = RemoteScripts.parseLocated(out)
         return when {
-            loc.aa != null -> Layout(loc.aa, loc.plugin)
+            loc.aa != null -> Layout(loc.aa, loc.plugin, va = loc.va)
             loc.nbtApp != null -> Layout(loc.nbtApp, loc.plugin, nbtApps = true, env = loc.nbtData ?: loc.nbtApp)
             else -> null
         }
@@ -530,6 +530,64 @@ object HeadUnit {
             }
             rep.say("Done in ${clock.total()}.", Level.INFO)
             Outcome(daemonDone, pluginDone, skipped, daemon?.let { BuildPackage.findVersion(it.bytes) } ?: st.version, problems)
+        }
+    }
+
+    // ---- uninstall (a hand install, the one this app makes) ----
+
+    /** Why this app does not remove an NBTApps install. */
+    const val NBTAPPS_UNINSTALL_NOTE =
+        "Android Auto on this head unit was installed with NBTApps. Remove it in NBTApps: it keeps records of what it " +
+            "installed, and deleting its files from outside would leave it confused. This app removes what it installs " +
+            "itself (Sq00ky's release in /opt/aa)."
+
+    private fun planOf(ssh: SshSession, lay: Layout): RemoteScripts.UninstallPlan =
+        RemoteScripts.parseUninstall(
+            ssh.exec(RemoteScripts.uninstall(lay.aa, lay.plugin, lay.va, keepEnv = false, apply = false), timeoutMs = 60_000).text
+        )
+
+    /** What an uninstall would do, without doing anything. */
+    fun uninstallPlan(host: String): RemoteScripts.UninstallPlan =
+        SshSession(host).use { ssh ->
+            val lay = locate(ssh)
+            if (lay.nbtApps) throw IOException(NBTAPPS_UNINSTALL_NOTE)
+            planOf(ssh, lay).also {
+                if (it.failed != null) throw IOException("Looking at the head unit failed (${it.failed}).")
+            }
+        }
+
+    /** What an uninstall did and what is still there afterwards that should not be. */
+    class Removal(val plan: RemoteScripts.UninstallPlan, val problems: List<String>)
+
+    fun uninstall(host: String, rep: Reporter, keepEnv: Boolean): Removal {
+        val clock = Clock()
+        rep.say("Logging in to $host…", Level.INFO)
+        return SshSession(host).use { ssh ->
+            rep.say("Logged in (${clock.step()}).", Level.INFO)
+            val pr = probe(ssh)
+            val lay = pr.layout
+            if (lay.nbtApps) throw IOException(NBTAPPS_UNINSTALL_NOTE)
+            rep.say("NBT-AAD folder: ${lay.aa}", Level.INFO)
+            stopDaemon(ssh, rep, pr.scan)
+            clock.step()
+            val r = ssh.exec(RemoteScripts.uninstall(lay.aa, lay.plugin, lay.va, keepEnv, apply = true), timeoutMs = 120_000)
+            val plan = RemoteScripts.parseUninstall(r.text)
+            if (r.exit != 0 || !plan.done || plan.failed != null) throw stepFailure("Removing Android Auto", r.exit, r.err)
+            if (plan.remountFailed) rep.say("The partition could not be made writable (continuing).", Level.WARN)
+            for ((from, to) in plan.moves) rep.say("Moved aside: $from -> $to", Level.INFO)
+            rep.say("Removed ${plan.removes.size + plan.envFiles.size} files and folders (${clock.step()}).", Level.INFO)
+            for (k in plan.kept) rep.say("Kept: $k", Level.INFO)
+            for (l in plan.left) rep.say("Left alone (not part of NBT-AAD): $l", Level.WARN)
+            // look again: what a second uninstall would still remove was not removed
+            val again = try { planOf(ssh, lay) } catch (e: Exception) { null }
+            val problems = ArrayList<String>()
+            again?.let { a ->
+                val rest = a.removes.filter { !it.endsWith("/NbtAad.old") } + (if (keepEnv) emptyList() else a.envFiles)
+                if (rest.isNotEmpty()) problems += "Still on the head unit: ${rest.joinToString(", ")}."
+            }
+            for (m in problems) rep.say(m, Level.WARN)
+            rep.say("Done in ${clock.total()}.", Level.INFO)
+            Removal(plan, problems)
         }
     }
 
