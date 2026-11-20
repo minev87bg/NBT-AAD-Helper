@@ -846,11 +846,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             Opt(
                 key = k,
                 group = ConfigParser.GROUP_CUSTOM,
-                summary = "Added by you.",
+                // no line under the name: everything in this group is added by hand, and it would only take room
+                summary = "",
                 info = "You added this option yourself, for a setting that the README's list does not have (for " +
                     "example from a newer or experimental build). The app does not know what it does or which " +
                     "values it takes, so the value is free text. It stays in this list on this phone, whatever " +
-                    "the settings sync brings. \"Remove from list\" takes it out again.",
+                    "the settings sync brings. \"Remove\" takes it out again.",
             )
         }
     }

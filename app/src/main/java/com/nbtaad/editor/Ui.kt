@@ -437,7 +437,7 @@ private fun OptionsScreen(vm: MainViewModel) {
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.padding(top = 18.dp, bottom = 4.dp),
+                                modifier = Modifier.padding(top = 12.dp, bottom = 2.dp),
                             )
                         }
                     }
@@ -623,7 +623,7 @@ private fun OptionRow(
         applied -> Modifier.background(Green.copy(alpha = 0.10f), shape).border(1.5.dp, Green, shape)
         else -> Modifier
     }
-    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp).then(mark).padding(horizontal = 8.dp, vertical = 6.dp)) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 2.dp).then(mark).padding(horizontal = 8.dp, vertical = 4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(opt.key, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
@@ -634,12 +634,18 @@ private fun OptionRow(
                     Text("Default: $it", fontSize = 11.sp, color = soft, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
             }
+            // an option added by hand: taking it out of the list sits in the heading row, not on a row of its own
+            if (onRemove != null) {
+                TextButton(onClick = onRemove, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) {
+                    Text("Remove", fontSize = 12.sp)
+                }
+            }
             Box {
                 InfoDot { showInfo = true }
                 if (showInfo) InfoBalloon(opt.key, opt.info) { showInfo = false }
             }
         }
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(4.dp))
 
         if (!hasPresets) {
             val ph = when {
@@ -726,12 +732,6 @@ private fun OptionRow(
                 color = Green,
                 modifier = Modifier.padding(top = 4.dp),
             )
-        }
-
-        if (onRemove != null) {
-            TextButton(onClick = onRemove, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) {
-                Text("Remove from list", fontSize = 12.sp)
-            }
         }
     }
 }
