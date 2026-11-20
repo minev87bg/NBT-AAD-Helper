@@ -21,6 +21,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.luminance
@@ -459,24 +461,29 @@ private fun OptionsScreen(vm: MainViewModel) {
                         lastGroup = opt.group
                         val g = opt.group
                         item(key = "__group_$g") {
-                            Text(
-                                "$g (${visible.count { it.group == g }})",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.padding(top = 8.dp, bottom = 1.dp),
-                            )
+                            GroupHeader(g, visible.count { it.group == g }, mine = g == ConfigParser.GROUP_CUSTOM)
                         }
                     }
                     item(key = opt.key) {
                         // only the options the person added can be taken out of the list again
-                        val remove: (() -> Unit)? =
-                            if (opt.group == ConfigParser.GROUP_CUSTOM) ({ vm.removeCustom(opt.key) }) else null
-                        OptionRow(
-                            opt, vm.values[opt.key], vm.isApplied(opt.key), vm.isChanged(opt.key), vm.orig[opt.key],
-                            { vm.undo(opt.key) }, remove,
-                        ) { vm.edit(opt.key, it) }
-                        HorizontalDivider(color = MaterialTheme.colorScheme.primary)
+                        val mine = opt.group == ConfigParser.GROUP_CUSTOM
+                        val remove: (() -> Unit)? = if (mine) ({ vm.removeCustom(opt.key) }) else null
+                        // the person's own options sit on a tinted ground with a bar down the side, so they cannot be
+                        // taken for the settings of the list below
+                        val bar = MaterialTheme.colorScheme.primary
+                        val ground = if (mine) {
+                            Modifier
+                                .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f))
+                                .drawBehind { drawRect(bar, size = Size(4.dp.toPx(), size.height)) }
+                                .padding(start = 4.dp)
+                        } else Modifier
+                        Column(Modifier.fillMaxWidth().then(ground)) {
+                            OptionRow(
+                                opt, vm.values[opt.key], vm.isApplied(opt.key), vm.isChanged(opt.key), vm.orig[opt.key],
+                                { vm.undo(opt.key) }, remove,
+                            ) { vm.edit(opt.key, it) }
+                            HorizontalDivider(color = MaterialTheme.colorScheme.primary)
+                        }
                     }
                 }
             }
@@ -782,6 +789,25 @@ private fun CompactField(value: String, onChange: (String) -> Unit, placeholder:
             )
         },
     )
+}
+
+/**
+ * The band that opens a section of the settings list. The section of the options the person added is filled solid,
+ * the others are pale, and every band has room above it, so the sections do not fade into one another.
+ */
+@Composable
+private fun GroupHeader(name: String, count: Int, mine: Boolean) {
+    val scheme = MaterialTheme.colorScheme
+    val fill = if (mine) scheme.primary else scheme.primaryContainer
+    val ink = if (mine) scheme.onPrimary else scheme.onPrimaryContainer
+    Row(
+        Modifier.fillMaxWidth().padding(top = 18.dp, bottom = 4.dp).clip(RoundedCornerShape(6.dp)).background(fill)
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(name, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = ink, modifier = Modifier.weight(1f))
+        Text("$count", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = ink)
+    }
 }
 
 @Composable
