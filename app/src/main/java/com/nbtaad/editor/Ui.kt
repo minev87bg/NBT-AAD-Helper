@@ -32,6 +32,7 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -47,6 +48,35 @@ internal val Green = Color(0xFF2E7D32)
 internal val Red = Color(0xFFC62828)
 internal val Amber = Color(0xFFC77700)
 
+/** The blue of the "Change a setting" tile's icon on the choice page: the accent of the settings page. */
+internal val SettingsBlue = Color(0xFF5B93F0)
+
+/**
+ * The settings page's buttons, headings, links and separators take the blue of its tile's icon instead of the app's
+ * green, so it is recognised as the page of that tile. On the light theme a deeper blue keeps the text readable.
+ */
+@Composable
+internal fun SettingsTheme(content: @Composable () -> Unit) {
+    val base = MaterialTheme.colorScheme
+    val dark = base.background.luminance() < 0.5f
+    val scheme = if (dark) {
+        base.copy(
+            primary = SettingsBlue, onPrimary = Color(0xFF0D1117),
+            primaryContainer = Color(0xFF1B2F4A), onPrimaryContainer = Color(0xFFCFE5FF),
+            secondaryContainer = Color(0xFF1B2F4A), onSecondaryContainer = Color(0xFFCFE5FF),
+            surfaceTint = SettingsBlue,
+        )
+    } else {
+        base.copy(
+            primary = Color(0xFF2F63C0), onPrimary = Color.White,
+            primaryContainer = Color(0xFFD9E6FF), onPrimaryContainer = Color(0xFF0D2A57),
+            secondaryContainer = Color(0xFFD9E6FF), onSecondaryContainer = Color(0xFF0D2A57),
+            surfaceTint = Color(0xFF2F63C0),
+        )
+    }
+    MaterialTheme(colorScheme = scheme, content = content)
+}
+
 @Composable
 fun App(vm: MainViewModel) {
     Surface(Modifier.fillMaxSize().safeDrawingPadding()) {
@@ -54,7 +84,7 @@ fun App(vm: MainViewModel) {
             when (vm.screen) {
                 Screen.DETECT -> DetectScreen(vm)
                 Screen.HUB -> HubScreen(vm)
-                Screen.OPTIONS -> OptionsScreen(vm)
+                Screen.OPTIONS -> SettingsTheme { OptionsScreen(vm) }
                 Screen.INSTALL -> InstallScreen(vm)
                 Screen.EXPERIMENTAL -> ExperimentalScreen(vm)
                 Screen.CONTRIBUTE -> ContributeScreen(vm)
@@ -391,14 +421,7 @@ private fun OptionsScreen(vm: MainViewModel) {
                             color = if (used > EnvCheck.MAX_SETTINGS) Red else Color.Unspecified,
                         )
                         Spacer(Modifier.height(8.dp))
-                        OutlinedTextField(
-                            value = vm.search,
-                            onValueChange = { vm.search = it },
-                            singleLine = true,
-                            textStyle = TextStyle(fontSize = 14.sp),
-                            placeholder = { Text("Search settings") },
-                            modifier = Modifier.fillMaxWidth(),
-                        )
+                        CompactField(vm.search, { vm.search = it }, "Search settings", Modifier.fillMaxWidth())
                         Row(
                             Modifier.fillMaxWidth().padding(vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically,
@@ -438,10 +461,10 @@ private fun OptionsScreen(vm: MainViewModel) {
                         item(key = "__group_$g") {
                             Text(
                                 "$g (${visible.count { it.group == g }})",
-                                fontSize = 13.sp,
+                                fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.padding(top = 12.dp, bottom = 2.dp),
+                                modifier = Modifier.padding(top = 8.dp, bottom = 1.dp),
                             )
                         }
                     }
@@ -453,7 +476,7 @@ private fun OptionsScreen(vm: MainViewModel) {
                             opt, vm.values[opt.key], vm.isApplied(opt.key), vm.isChanged(opt.key), vm.orig[opt.key],
                             { vm.undo(opt.key) }, remove,
                         ) { vm.edit(opt.key, it) }
-                        HorizontalDivider()
+                        HorizontalDivider(color = MaterialTheme.colorScheme.primary)
                     }
                 }
             }
@@ -627,29 +650,29 @@ private fun OptionRow(
         applied -> Modifier.background(Green.copy(alpha = 0.10f), shape).border(1.5.dp, Green, shape)
         else -> Modifier
     }
-    Column(Modifier.fillMaxWidth().padding(vertical = 2.dp).then(mark).padding(horizontal = 8.dp, vertical = 4.dp)) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 1.dp).then(mark).padding(horizontal = 6.dp, vertical = 3.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text(opt.key, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
+                Text(opt.key, fontWeight = FontWeight.SemiBold, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
                 if (opt.summary.isNotBlank()) {
-                    Text(opt.summary, fontSize = 12.sp, color = soft, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                    Text(opt.summary, fontSize = 11.sp, lineHeight = 14.sp, color = soft, maxLines = 3, overflow = TextOverflow.Ellipsis)
                 }
                 opt.default?.let {
-                    Text("Default: $it", fontSize = 11.sp, color = soft, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text("Default: $it", fontSize = 10.sp, color = soft, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
             }
             // an option added by hand: taking it out of the list sits in the heading row, not on a row of its own
             if (onRemove != null) {
                 TextButton(onClick = onRemove, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) {
-                    Text("Remove", fontSize = 12.sp)
+                    Text("Remove", fontSize = 11.sp)
                 }
             }
             Box {
-                InfoDot { showInfo = true }
+                InfoDot(size = 22.dp) { showInfo = true }
                 if (showInfo) InfoBalloon(opt.key, opt.info) { showInfo = false }
             }
         }
-        Spacer(Modifier.height(4.dp))
+        Spacer(Modifier.height(3.dp))
 
         if (!hasPresets) {
             val ph = when {
@@ -660,15 +683,19 @@ private fun OptionRow(
             CompactField(value ?: "", { onChange(it) }, ph, Modifier.fillMaxWidth())
         } else {
             Box {
-                OutlinedButton(onClick = { menu = true }, modifier = Modifier.fillMaxWidth()) {
+                OutlinedButton(
+                    onClick = { menu = true },
+                    modifier = Modifier.fillMaxWidth().height(32.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                ) {
                     val label = when {
                         value == null -> "(not set)"
                         value.isBlank() -> "Custom…"
                         value in opt.values -> opt.choiceText(value)
                         else -> value
                     }
-                    Text(label, modifier = Modifier.weight(1f), textAlign = TextAlign.Start, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text("▾")
+                    Text(label, fontSize = 12.sp, modifier = Modifier.weight(1f), textAlign = TextAlign.Start, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text("▾", fontSize = 12.sp)
                 }
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                     DropdownMenuItem(
@@ -688,7 +715,7 @@ private fun OptionRow(
                 }
             }
             if (isCustomValue) {
-                CompactField(value ?: "", { onChange(it) }, "Type a value", Modifier.fillMaxWidth().padding(top = 4.dp))
+                CompactField(value ?: "", { onChange(it) }, "Type a value", Modifier.fillMaxWidth().padding(top = 3.dp))
             }
         }
 
@@ -696,9 +723,9 @@ private fun OptionRow(
             Text(
                 "\"$value\" is not one of the documented values (${opt.values.joinToString(", ")}). " +
                     "The daemon may ignore it.",
-                fontSize = 12.sp,
+                fontSize = 11.sp,
                 color = Amber,
-                modifier = Modifier.padding(top = 4.dp),
+                modifier = Modifier.padding(top = 2.dp),
             )
         }
 
@@ -706,21 +733,21 @@ private fun OptionRow(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     "Changed. Was: ${original?.takeIf { it.isNotBlank() } ?: "(not set)"}",
-                    fontSize = 12.sp,
+                    fontSize = 11.sp,
                     color = Red,
                     modifier = Modifier.weight(1f),
                 )
                 TextButton(onClick = onUndo, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) {
-                    Text("Undo", fontSize = 12.sp)
+                    Text("Undo", fontSize = 11.sp)
                 }
             }
         } else if (applied) {
             Text(
                 "Currently applied on the head unit",
-                fontSize = 12.sp,
+                fontSize = 11.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = Green,
-                modifier = Modifier.padding(top = 4.dp),
+                modifier = Modifier.padding(top = 2.dp),
             )
         }
     }
@@ -738,7 +765,7 @@ private fun CompactField(value: String, onChange: (String) -> Unit, placeholder:
         value = value,
         onValueChange = onChange,
         singleLine = true,
-        textStyle = TextStyle(fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface),
+        textStyle = TextStyle(fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface),
         cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
         interactionSource = source,
         modifier = modifier,
@@ -750,19 +777,19 @@ private fun CompactField(value: String, onChange: (String) -> Unit, placeholder:
                 singleLine = true,
                 visualTransformation = VisualTransformation.None,
                 interactionSource = source,
-                placeholder = { Text(placeholder, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                placeholder = { Text(placeholder, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
             )
         },
     )
 }
 
 @Composable
-internal fun InfoDot(onClick: () -> Unit) {
+internal fun InfoDot(size: Dp = 26.dp, onClick: () -> Unit) {
     Box(
-        Modifier.size(26.dp).clip(CircleShape).border(1.dp, Color.Gray, CircleShape).clickable(onClick = onClick),
+        Modifier.size(size).clip(CircleShape).border(1.dp, Color.Gray, CircleShape).clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
-    ) { Text("i", fontSize = 14.sp, fontWeight = FontWeight.Bold) }
+    ) { Text("i", fontSize = if (size < 26.dp) 12.sp else 14.sp, fontWeight = FontWeight.Bold) }
 }
 
 /** The small scrollable balloon under an (i): a grey heading and the text. */

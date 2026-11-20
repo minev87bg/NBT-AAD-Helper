@@ -86,7 +86,7 @@ fun HubScreen(vm: MainViewModel) {
         Spacer(Modifier.height(12.dp))
         WideTile(
             icon = HubIcon.SETTINGS,
-            tint = Color(0xFF5B93F0),
+            tint = SettingsBlue,
             title = "Change a setting",
             subtitle = "Edit nbt-aad.env",
             info = "Edit nbt-aad.env on the head unit: every setting of the daemon, what it does, and which are applied now.",
