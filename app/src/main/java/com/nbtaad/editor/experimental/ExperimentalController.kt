@@ -5,6 +5,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.nbtaad.editor.data.CommunityPrefs
 import com.nbtaad.editor.install.SourceFile
 import com.nbtaad.editor.log.AppLog
 import com.nbtaad.editor.net.Online
@@ -17,8 +18,9 @@ import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 
 /**
- * The state of the Experimental page: the project's issues and pull requests, which of them share files, the one that
- * is open, its comments, its digest, and the download of a file that someone shared.
+ * The state of the community browser: the project's issues and pull requests, how they are filtered and sorted, which of
+ * them the person follows and which share files, the one that is open, its comments, its digest, and the download of a
+ * file that someone shared.
  */
 class ExperimentalController(
     private val ctx: Context,
@@ -36,10 +38,15 @@ class ExperimentalController(
     var error by mutableStateOf(false); private set
     var remaining by mutableStateOf<Int?>(null); private set
 
-    var tab by mutableStateOf(Tab.ISSUES)
-    var showClosed by mutableStateOf(false)
+    private val prefs = CommunityPrefs(ctx)
 
-    var scanBusy by mutableStateOf(false); private set
+    var tab by mutableStateOf(Tab.ISSUES)
+    var show by mutableStateOf(Show.OPEN)
+    var sortBy by mutableStateOf(prefs.sort()); private set
+
+    /** The numbers of the pages the person follows (the star), kept on the phone. */
+    var following by mutableStateOf(prefs.following()); private set
+
     var scanNote by mutableStateOf(""); private set
     var scanned by mutableStateOf<Map<Int, List<FileLink>>>(emptyMap()); private set
 
@@ -91,10 +98,28 @@ class ExperimentalController(
     private val commentCache = HashMap<Int, List<Comment>>()
 
     fun visible(): List<Topic> =
-        (topics ?: emptyList()).filter { (it.isPr == (tab == Tab.PRS)) && (it.open != showClosed) }
+        TopicView.shown(topics ?: emptyList(), tab == Tab.PRS, show, following, sortBy)
 
-    fun count(tab: Tab, closed: Boolean): Int =
-        (topics ?: emptyList()).count { (it.isPr == (tab == Tab.PRS)) && (it.open != closed) }
+    fun count(tab: Tab, show: Show): Int =
+        TopicView.count(topics ?: emptyList(), tab == Tab.PRS, show, following)
+
+    /** Followed pages that are not in the loaded list (older than the newest 300). */
+    fun missingFollowed(): Int = topics?.let { TopicView.missing(it, following) } ?: 0
+
+    fun isFollowing(number: Int): Boolean = number in following
+
+    /** The star: follows a page, or stops following it. */
+    fun toggleFollow(t: Topic) {
+        following = if (t.number in following) following - t.number else following + t.number
+        prefs.saveFollowing(following)
+        AppLog.i("Experimental", "#${t.number} ${if (t.number in following) "is followed" else "is not followed any more"}")
+    }
+
+    /** Orders the list now; REFRESH then loads the list in that order too. */
+    fun sort(by: SortBy) {
+        sortBy = by
+        prefs.saveSort(by)
+    }
 
     fun isKnown(key: String) = isKnownSetting(key)
 
@@ -108,19 +133,23 @@ class ExperimentalController(
         message = if (e is IssuesApi.RateLimited) e.message ?: "" else "$prefix: ${Online.describe(e)}"
     }
 
+    /** Loads the list in the chosen order, then looks through it and the newest comments for files. One button for both. */
     fun refresh() {
         if (loading) return
         loading = true
         error = false
+        scanNote = ""
         message = "Loading from GitHub…"
         scope.launch(Dispatchers.IO) {
             try {
-                val r = IssuesApi.topics(ctx)
+                val r = IssuesApi.topics(ctx, sortBy)
                 topics = r.value
                 remaining = r.remaining
                 commentCache.clear()
+                message = "Looking for files in the posts…"
+                scanFiles(r.value)
                 val at = LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm"))
-                message = "${r.value.size} pages loaded at $at" + (r.remaining?.let { ", $it requests left this hour" } ?: "")
+                message = "${r.value.size} pages loaded at $at" + (remaining?.let { ", $it requests left this hour" } ?: "")
                 AppLog.i("Experimental", message)
             } catch (e: Exception) {
                 fail("Could not load the list", e)
@@ -130,37 +159,30 @@ class ExperimentalController(
         }
     }
 
-    /** Looks through the first posts and the newest comments of the project for links to files. */
-    fun scan() {
-        val list = topics ?: return
-        if (scanBusy) return
-        scanBusy = true
-        scanNote = "Looking for files in the comments…"
-        scope.launch(Dispatchers.IO) {
-            try {
-                val c = IssuesApi.recentComments(ctx)
-                remaining = c.remaining ?: remaining
-                val found = LinkedHashMap<Int, MutableList<FileLink>>()
-                for (t in list) {
-                    val f = Links.files(t.body, t.author, "the first post")
-                    if (f.isNotEmpty()) found.getOrPut(t.number) { ArrayList() } += f
-                }
-                for (cm in c.value) {
-                    val f = Links.files(cm.body, cm.author, "a comment on ${cm.created.take(10)}")
-                    if (f.isNotEmpty() && cm.topic > 0) found.getOrPut(cm.topic) { ArrayList() } += f
-                }
-                scanned = found.mapValues { (_, v) -> v.distinctBy { it.url } }
-                val older = if (c.value.size >= 300) " Older comments were not looked at." else ""
-                scanNote = "Looked at the first posts and the newest ${c.value.size} comments: " +
-                    (if (found.isEmpty()) "no page shares a file." else "${found.size} page${if (found.size == 1) "" else "s"} share files.") +
-                    older
-                AppLog.i("Experimental", scanNote)
-            } catch (e: Exception) {
-                AppLog.w("Experimental", "Scan failed: ${e.javaClass.simpleName}: ${e.message}")
-                scanNote = if (e is IssuesApi.RateLimited) e.message ?: "" else "Could not scan: ${Online.describe(e)}"
-            } finally {
-                scanBusy = false
+    /**
+     * Looks through the first posts and the newest comments of the project for links to files. The pages that share
+     * some are marked in the list. A failure here leaves the list as it is and says so under it.
+     */
+    private fun scanFiles(list: List<Topic>) {
+        try {
+            val c = IssuesApi.recentComments(ctx)
+            remaining = c.remaining ?: remaining
+            val found = LinkedHashMap<Int, MutableList<FileLink>>()
+            for (t in list) {
+                val f = Links.files(t.body, t.author, "the first post")
+                if (f.isNotEmpty()) found.getOrPut(t.number) { ArrayList() } += f
             }
+            for (cm in c.value) {
+                val f = Links.files(cm.body, cm.author, "a comment on ${cm.created.take(10)}")
+                if (f.isNotEmpty() && cm.topic > 0) found.getOrPut(cm.topic) { ArrayList() } += f
+            }
+            scanned = found.mapValues { (_, v) -> v.distinctBy { it.url } }
+            scanNote = if (found.isEmpty()) "No page shares a file." else "${found.size} page${if (found.size == 1) "" else "s"} share files (marked)."
+            if (c.value.size >= 300) scanNote += " Older comments were not looked at."
+            AppLog.i("Experimental", "Looked at the first posts and the newest ${c.value.size} comments: $scanNote")
+        } catch (e: Exception) {
+            AppLog.w("Experimental", "Scan failed: ${e.javaClass.simpleName}: ${e.message}")
+            scanNote = if (e is IssuesApi.RateLimited) e.message ?: "" else "Could not look for files: ${Online.describe(e)}"
         }
     }
 

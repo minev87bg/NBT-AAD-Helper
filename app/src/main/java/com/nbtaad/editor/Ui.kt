@@ -54,6 +54,7 @@ fun App(vm: MainViewModel) {
                 Screen.INSTALL -> InstallScreen(vm)
                 Screen.EXPERIMENTAL -> ExperimentalScreen(vm)
                 Screen.CONTRIBUTE -> ContributeScreen(vm)
+                Screen.WIZARD -> WizardScreen(vm)
             }
             ThemeToggle(vm, Modifier.align(Alignment.TopEnd).padding(4.dp))
         }
@@ -354,7 +355,7 @@ private fun ManualDialog(vm: MainViewModel) {
 
 @Composable
 private fun OptionsScreen(vm: MainViewModel) {
-    BackHandler { vm.backToHub() }
+    BackHandler { if (vm.fromWizard) vm.backToWizard() else vm.backToHub() }
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val h = maxHeight
@@ -464,6 +465,8 @@ private fun OptionsScreen(vm: MainViewModel) {
                     modifier = Modifier.padding(bottom = 8.dp),
                 )
             }
+            // only when this page was opened from the wizard
+            if (vm.fromWizard) BackToWizardButton(vm, Modifier.padding(bottom = 8.dp))
         }
     }
 

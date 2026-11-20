@@ -40,10 +40,10 @@ once, then install a release. From then on updates install over the existing app
    to try things away from the car. What needs the head unit (reading, saving, installing, going back, CHECK AGAIN,
    TOOLS CHECK) looks for the car itself when none is known ("No car known yet. Looking for the car…"), so nothing sends
    you back to the first screen; if no car is found it says why (for example "Car found, but SSH is closed").
-4. NEXT opens the page where you choose what to do, four tiles: **Install / update** (big green tile, NBT Android
-   Auto), **Change a setting** (edit nbt-aad.env), **Experimental** (browse issues and pull requests, scan them for
-   files; coming next) and **Contribute** (pick log files from the head unit, zip them, open the issue page in the
-   browser; coming later). The (i) on each tile says what it is for.
+4. NEXT opens the page where you choose what to do, three tiles: **Install / update** (big green tile, NBT Android
+   Auto), **Change a setting** (edit nbt-aad.env) and **Browse community for more** (big amber tile: the project's
+   issues and pull requests, and **PREPARE LOGS** on each page to take part in a test). The (i) on each tile says what
+   it is for.
 
 If the SSH connection to the head unit cannot be made (an old address, the WiFi changed), Install, Go back, the status
 check, TOOLS CHECK, reading the options and SAVE look for the car again and try once more at the address they find. A
@@ -64,13 +64,26 @@ so. Errors of internet requests are never worded as car or SSH problems.
 **Theme** (top right of every screen): *Theme Auto* follows the phone, *Theme White* is the light theme, *Theme Dark* is
 the dark theme in the colours of GitHub's dark theme (background `#0d1117`, not black, which is easier on the eyes).
 
-### Experimental
-The page has the amber of the EXPERIMENTAL tile's icon as its accent (chips, buttons, links, progress), and a page that shares files has a thick amber outline, a faint amber tint and a solid FILES stamp, so it is found at a glance. The Install / update tile on the choice page is a soft sage green: still the only coloured, bigger tile, but easy on the eye.
+### Browse community for more
+The page has the amber of its tile as its accent (chips, buttons, links, progress), and a page that shares files has a thick amber outline, a faint amber tint and a solid FILES stamp, so it is found at a glance. The Install / update tile on the choice page is a soft sage green, easy on the eye.
 
 Issues and pull requests of Sq00ky's project, open and closed, read from GitHub without signing in (60 requests an hour;
-the page says how many are left). Chips switch between issues and pull requests, open and closed. **SCAN FOR FILES**
-looks through the first posts and the newest 300 comments (three requests) for links to files and marks the pages that
-share some with a FILES pill. A page shows its text and comments formatted like on GitHub: headings, **bold**, *italic*, `inline code`, code blocks
+the page says how many are left). Chips switch between issues and pull requests, and between **Open**, **Closed** and
+**★ Following** (the pages marked with the star, issues and pull requests together, open or closed, close together on
+the list). **Sort** orders the list by recent activity or by the day a page was opened. **REFRESH** loads the list in
+that order and then looks through the first posts and the newest 300 comments (six requests in all) for links to files;
+the pages that share some get a FILES pill. The star (on the list and on a page) is kept on the phone.
+
+**PREPARE LOGS** (a button that stays at the bottom of an open page) asks for **USE WIZARD** or **MANUAL**. The wizard:
+which version (CURRENT, or DIFFERENT which opens the Install page), the settings (read from the head unit, CHANGE opens
+the settings page; both pages show BACK TO WIZARD only when they were opened from the wizard), the test (restart the
+head unit, join the car's WiFi, try the problem, leave Android Auto running), the way back to the dongle's WiFi (a tick
+that says the logs are lost if Android Auto restarts, CHOOSE WIFI opens Android's own WiFi list over the app, a green
+dot shows when SSH answers, and the wizard moves on by itself), and the logs (tick them, pack them: the WiFi password
+and the VIN are hidden, the zip is saved in Downloads and **OPEN IN BROWSER** opens the page at its comment box, where
+the zip is attached). MANUAL is the page where the files are ticked by hand.
+
+A page shows its text and comments formatted like on GitHub: headings, **bold**, *italic*, `inline code`, code blocks
 (coloured, scrolling sideways), tables (scrolling sideways), numbered, bulleted and task lists, quotes, rules and
 links (they open in the browser); pictures are shown as a tappable "[picture]" link. Long comments are collapsed with
 **Show more**. **OPEN ON GITHUB** opens the page in the browser.

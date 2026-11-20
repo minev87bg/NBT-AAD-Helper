@@ -60,9 +60,9 @@ object IssuesApi {
         return Fetched(all, remaining)
     }
 
-    /** Issues and pull requests, open and closed, the most recently changed first (up to 300). */
-    fun topics(ctx: Context): Fetched<List<Topic>> =
-        listPages(ctx, "$BASE/issues?state=all&sort=updated&direction=desc", 3) { IssueParser.topics(it) }
+    /** Issues and pull requests, open and closed, the newest first by [sort] (the last change, or the day opened): up to 300. */
+    fun topics(ctx: Context, sort: SortBy = SortBy.ACTIVITY): Fetched<List<Topic>> =
+        listPages(ctx, "$BASE/issues?state=all&sort=${sort.api}&direction=desc", 3) { IssueParser.topics(it) }
 
     /** The comments of one page (up to 300). */
     fun comments(ctx: Context, number: Int): Fetched<List<Comment>> =

@@ -1,7 +1,11 @@
 package com.nbtaad.editor.contribute
 
+import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -75,8 +79,9 @@ class ContributeController(
 
     val working: Boolean get() = looking || packing
 
-    /** The page to attach the zip on: the chosen issue or pull request, else a new issue. */
-    fun pageUrl(): String = target?.url?.takeIf { it.startsWith("https://") } ?: NEW_ISSUE_URL
+    /** The page to attach the zip on: the chosen issue or pull request (scrolled to the comment box), else a new issue. */
+    fun pageUrl(): String =
+        target?.url?.takeIf { it.startsWith("https://") }?.let { PageLinks.commentBox(it) } ?: NEW_ISSUE_URL
 
     /** "Issue #187: title" */
     fun targetText(): String = target?.let { (if (it.isPr) "Pull request #" else "Issue #") + "${it.number}: ${it.title}" } ?: "A new issue"
@@ -211,8 +216,15 @@ class ContributeController(
                     target?.let { targetText() }, passwords, vins,
                 )
                 val zip = LogPack.zip(entries, info)
-                packed = PackedLogs(LogPack.zipName(now), zip, passwords, vins, skipped, entries.map { it.name })
+                val made = PackedLogs(LogPack.zipName(now), zip, passwords, vins, skipped, entries.map { it.name })
                 AppLog.i("Contribute", "Packed ${entries.size} files into ${zip.size} bytes; hid $passwords passwords and $vins VINs; skipped: ${skipped.ifEmpty { "none" }}")
+                packed = made
+                // the zip goes straight into Downloads, where the browser's file picker finds it: no extra step for the person
+                if (saveToDownloads(made)) {
+                    saved = true
+                    saveNote = "Saved in your Downloads folder (${LogFinder.sizeText(zip.size.toLong())})."
+                    AppLog.i("Contribute", "Zip saved in Downloads: ${made.name}")
+                }
                 packMessage = ""
             } catch (e: SshCancelled) {
                 packMessage = "Stopped."
@@ -232,6 +244,33 @@ class ContributeController(
         cancel = true
     }
 
+    /** Puts the zip in the phone's Downloads folder (Android 10 and later, no permission needed); false when that does not work. */
+    private fun saveToDownloads(z: PackedLogs): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return false
+        return try {
+            val resolver = ctx.contentResolver
+            val values = ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, z.name)
+                put(MediaStore.MediaColumns.MIME_TYPE, "application/zip")
+                put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                put(MediaStore.MediaColumns.IS_PENDING, 1)
+            }
+            val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return false
+            try {
+                resolver.openOutputStream(uri)?.use { it.write(z.bytes) } ?: throw IOException("The phone would not open the new file.")
+                val done = ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }
+                resolver.update(uri, done, null, null)
+            } catch (e: Exception) {
+                resolver.delete(uri, null, null)
+                throw e
+            }
+            true
+        } catch (e: Exception) {
+            AppLog.w("Contribute", "Saving in Downloads failed: ${e.javaClass.simpleName}: ${e.message}")
+            false
+        }
+    }
+
     /** Writes the zip to the file the person chose. */
     fun saveTo(uri: Uri) {
         val z = packed ?: return
@@ -243,8 +282,8 @@ class ContributeController(
                 saveNote = "Saved: ${LogFinder.sizeText(z.bytes.size.toLong())}."
                 AppLog.i("Contribute", "Zip saved (${z.bytes.size} bytes)")
             } catch (e: Exception) {
-                saved = false
-                saveNote = "Could not save: ${e.message ?: e.javaClass.simpleName}"
+                // a copy that did not work does not undo the zip that is already in Downloads
+                if (!saved) saveNote = "Could not save: ${e.message ?: e.javaClass.simpleName}"
                 AppLog.e("Contribute", "Saving the zip failed", e)
             }
         }

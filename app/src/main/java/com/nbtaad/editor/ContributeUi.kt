@@ -30,7 +30,7 @@ import com.nbtaad.editor.experimental.Topic
 @Composable
 fun ContributeScreen(vm: MainViewModel) {
     val c = vm.contribute
-    BackHandler { if (c.choosing) c.choosing = false else vm.backToHub() }
+    BackHandler { if (c.choosing) c.choosing = false else vm.backFromContribute() }
     var info by remember { mutableStateOf(false) }
 
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
@@ -73,7 +73,7 @@ fun ContributeScreen(vm: MainViewModel) {
 }
 
 @Composable
-private fun LogsCard(c: ContributeController) {
+internal fun LogsCard(c: ContributeController) {
     val soft = MaterialTheme.colorScheme.onSurfaceVariant
     OutlinedCard(Modifier.fillMaxWidth().padding(top = 14.dp)) {
         Column(Modifier.padding(12.dp)) {
@@ -153,7 +153,7 @@ private fun TargetCard(c: ContributeController) {
 }
 
 @Composable
-private fun PackCard(c: ContributeController) {
+internal fun PackCard(c: ContributeController) {
     val soft = MaterialTheme.colorScheme.onSurfaceVariant
     val uri = LocalUriHandler.current
     val packed = c.packed
@@ -233,22 +233,26 @@ private fun PackedBlock(c: ContributeController, p: PackedLogs, save: (String) -
     for (s in p.skipped) Text("Left out: $s", fontSize = 12.sp, color = Amber)
 
     Spacer(Modifier.height(8.dp))
-    Text("1. Save the zip on this phone", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-    OutlinedButton(onClick = { save(p.name) }) { Text(if (c.saved) "SAVE AGAIN" else "SAVE THE ZIP", fontSize = 12.sp) }
-    if (c.saveNote.isNotEmpty()) {
-        Text(c.saveNote, fontSize = 12.sp, color = if (c.saved) Green else Red)
+    if (c.saved && c.saveNote.isNotEmpty()) {
+        // it is on the phone already (Downloads, or the place the person chose)
+        Text(c.saveNote, fontSize = 12.sp, color = Green)
+    } else {
+        Text("1. Save the zip on this phone", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+        OutlinedButton(onClick = { save(p.name) }) { Text("SAVE THE ZIP", fontSize = 12.sp) }
+        if (c.saveNote.isNotEmpty()) Text(c.saveNote, fontSize = 12.sp, color = Red)
     }
+    if (c.saved) TextButton(onClick = { save(p.name) }) { Text("SAVE A COPY SOMEWHERE ELSE", fontSize = 11.sp) }
 
-    Spacer(Modifier.height(8.dp))
-    Text("2. Attach it on the page", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+    Spacer(Modifier.height(4.dp))
+    Text(if (c.saved) "Attach it on the page" else "2. Attach it on the page", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
     Text(
-        "Open ${c.targetText()}. In the comment box tap the paperclip (or the attach link) and pick the zip from the " +
-            "folder you saved it in. Then press Comment.",
+        "The page opens at the comment box (${c.targetText()}). Tap the paperclip (or the attach link), pick the zip " +
+            "from the Downloads folder, then press Comment. The browser asks you to sign in to GitHub if you are not.",
         fontSize = 12.sp,
         color = soft,
     )
     Button(onClick = openPage, enabled = c.saved, modifier = Modifier.padding(top = 4.dp)) {
-        Text("OPEN THE PAGE", fontSize = 12.sp)
+        Text("OPEN IN BROWSER", fontSize = 12.sp)
     }
     if (!c.saved) Text("Save the zip first.", fontSize = 11.sp, color = soft)
 }

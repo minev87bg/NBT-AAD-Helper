@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -28,12 +29,16 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -64,6 +69,8 @@ import com.nbtaad.editor.experimental.ExperimentalController
 import com.nbtaad.editor.experimental.FileKind
 import com.nbtaad.editor.experimental.FileLink
 import com.nbtaad.editor.experimental.Mentions
+import com.nbtaad.editor.experimental.Show
+import com.nbtaad.editor.experimental.SortBy
 import com.nbtaad.editor.experimental.Markdown
 import com.nbtaad.editor.experimental.Topic
 import kotlinx.coroutines.delay
@@ -87,7 +94,7 @@ internal val ExperimentalAmber = Color(0xFFE9A33A)
  * readable on the cream background.
  */
 @Composable
-private fun ExperimentalTheme(content: @Composable () -> Unit) {
+internal fun ExperimentalTheme(content: @Composable () -> Unit) {
     val base = MaterialTheme.colorScheme
     val dark = base.background.luminance() < 0.5f
     val scheme = if (dark) {
@@ -111,8 +118,12 @@ private fun ExperimentalTheme(content: @Composable () -> Unit) {
 private const val LIST_INFO =
     "What people report, test and suggest in Sq00ky's project, read from GitHub without signing in (GitHub allows 60 " +
         "requests an hour that way; the line under the buttons says how many are left).\n\n" +
-        "SCAN FOR FILES looks through the first posts and the newest comments for links to files, and marks the pages " +
-        "that share some. A shared zip or build file can be taken to the installer from the page.\n\n" +
+        "REFRESH loads the list in the chosen order and looks through the first posts and the newest comments for " +
+        "links to files. Pages that share files are marked FILES: a test build can be taken to the installer, a log " +
+        "can be read here.\n\n" +
+        "The star follows a page. FOLLOWING lists just those pages, open or closed.\n\n" +
+        "Open a page and press PREPARE LOGS to take part: the app guides you through a test and sends its logs to " +
+        "that page.\n\n" +
         "Files shared in a discussion come from other people. The app can check what a file is, not whether it is safe."
 
 @Composable
@@ -136,6 +147,7 @@ private fun TopicList(vm: MainViewModel) {
     val exp = vm.exp
     var showInfo by remember { mutableStateOf(false) }
     val shown = exp.visible()
+    val following = exp.show == Show.FOLLOWING
     LazyColumn(
         Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 56.dp, bottom = 24.dp),
@@ -143,10 +155,10 @@ private fun TopicList(vm: MainViewModel) {
         item(key = "head") {
             Column(Modifier.fillMaxWidth()) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Experimental", fontSize = 22.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                    Text("Browse community", fontSize = 22.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                     Box {
                         InfoDot { showInfo = true }
-                        if (showInfo) InfoBalloon("Experimental", LIST_INFO, mono = false) { showInfo = false }
+                        if (showInfo) InfoBalloon("Browse community", LIST_INFO, mono = false) { showInfo = false }
                     }
                 }
                 Text(
@@ -156,67 +168,123 @@ private fun TopicList(vm: MainViewModel) {
                 )
                 Spacer(Modifier.height(12.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // the followed pages are shown together, issues and pull requests, so the two tabs rest meanwhile
                     FilterChip(
-                        selected = exp.tab == ExperimentalController.Tab.ISSUES,
+                        selected = !following && exp.tab == ExperimentalController.Tab.ISSUES,
+                        enabled = !following,
                         onClick = { exp.tab = ExperimentalController.Tab.ISSUES },
-                        label = { Text("Issues ${exp.count(ExperimentalController.Tab.ISSUES, exp.showClosed)}", fontSize = 12.sp) },
+                        label = {
+                            Text(
+                                "Issues" + if (following) "" else " ${exp.count(ExperimentalController.Tab.ISSUES, exp.show)}",
+                                fontSize = 12.sp,
+                            )
+                        },
                     )
                     FilterChip(
-                        selected = exp.tab == ExperimentalController.Tab.PRS,
+                        selected = !following && exp.tab == ExperimentalController.Tab.PRS,
+                        enabled = !following,
                         onClick = { exp.tab = ExperimentalController.Tab.PRS },
-                        label = { Text("Pull requests ${exp.count(ExperimentalController.Tab.PRS, exp.showClosed)}", fontSize = 12.sp) },
+                        label = {
+                            Text(
+                                "Pull requests" + if (following) "" else " ${exp.count(ExperimentalController.Tab.PRS, exp.show)}",
+                                fontSize = 12.sp,
+                            )
+                        },
                     )
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(
-                        selected = !exp.showClosed,
-                        onClick = { exp.showClosed = false },
+                        selected = exp.show == Show.OPEN,
+                        onClick = { exp.show = Show.OPEN },
                         label = { Text("Open", fontSize = 12.sp) },
                     )
                     FilterChip(
-                        selected = exp.showClosed,
-                        onClick = { exp.showClosed = true },
+                        selected = exp.show == Show.CLOSED,
+                        onClick = { exp.show = Show.CLOSED },
                         label = { Text("Closed", fontSize = 12.sp) },
+                    )
+                    FilterChip(
+                        selected = following,
+                        onClick = { exp.show = Show.FOLLOWING },
+                        label = { Text("★ Following ${exp.count(ExperimentalController.Tab.ISSUES, Show.FOLLOWING)}", fontSize = 12.sp) },
                     )
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedButton(
-                        onClick = { exp.scan() },
-                        enabled = exp.topics != null && !exp.scanBusy && !exp.loading,
-                    ) { Text("SCAN FOR FILES", fontSize = 12.sp) }
-                    Spacer(Modifier.padding(horizontal = 4.dp))
-                    TextButton(onClick = { exp.refresh() }, enabled = !exp.loading && !exp.scanBusy) {
-                        Text("REFRESH", fontSize = 12.sp)
-                    }
+                    SortMenu(exp)
+                    Spacer(Modifier.weight(1f))
+                    OutlinedButton(onClick = { exp.refresh() }, enabled = !exp.loading) { Text("REFRESH", fontSize = 12.sp) }
                 }
-                if (exp.loading || exp.scanBusy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(vertical = 4.dp))
+                if (exp.loading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(vertical = 4.dp))
                 if (exp.message.isNotEmpty()) {
                     Text(exp.message, fontSize = 12.sp, color = if (exp.error) Red else MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 if (exp.scanNote.isNotEmpty()) {
                     Text(exp.scanNote, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
+                if (following && exp.missingFollowed() > 0) {
+                    Text(
+                        "${exp.missingFollowed()} followed page${if (exp.missingFollowed() == 1) " is" else "s are"} older than the " +
+                            "300 newest that are loaded, so not listed.",
+                        fontSize = 12.sp,
+                        color = Amber,
+                    )
+                }
                 Spacer(Modifier.height(8.dp))
             }
         }
         if (exp.topics != null && shown.isEmpty()) {
             item(key = "none") {
-                Text("Nothing here.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    if (following) "No page is followed yet. Tap the star on a page to follow it." else "Nothing here.",
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
-        items(shown, key = { it.number }) { t -> TopicRow(exp, t) }
+        items(shown, key = { it.number }) { t -> TopicRow(exp, t, compact = following) }
     }
 }
 
+/** "Sort: Recent activity ▾": the order of the list, next to the button that loads it. */
 @Composable
-private fun TopicRow(exp: ExperimentalController, t: Topic) {
+private fun SortMenu(exp: ExperimentalController) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        TextButton(onClick = { open = true }) { Text("Sort: ${exp.sortBy.label} ▾", fontSize = 12.sp) }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            for (by in SortBy.entries) {
+                DropdownMenuItem(text = { Text(by.label) }, onClick = { exp.sort(by); open = false })
+            }
+        }
+    }
+}
+
+/** The star of a page: filled when the person follows it. */
+@Composable
+private fun StarButton(on: Boolean, onClick: () -> Unit) {
+    Box(
+        Modifier.size(40.dp).clip(CircleShape).clickable(role = Role.Button, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            if (on) "★" else "☆",
+            fontSize = 22.sp,
+            color = if (on) ExperimentalAmber else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/** One page in the list. [compact]: the followed pages, close together, one line for the title. */
+@Composable
+private fun TopicRow(exp: ExperimentalController, t: Topic, compact: Boolean) {
     val files = exp.scanned[t.number]
     val hasFiles = !files.isNullOrEmpty()
     val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val soft = MaterialTheme.colorScheme.onSurfaceVariant
     // a page that shares files stands out: a thick outline in the page's amber, a faint amber tint, a solid stamp
     OutlinedCard(
         onClick = { exp.select(t) },
-        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        modifier = Modifier.fillMaxWidth().padding(vertical = if (compact) 2.dp else 4.dp),
         colors = if (hasFiles) {
             CardDefaults.outlinedCardColors(
                 containerColor = ExperimentalAmber.copy(alpha = if (dark) 0.11f else 0.16f).compositeOver(MaterialTheme.colorScheme.surface),
@@ -226,34 +294,48 @@ private fun TopicRow(exp: ExperimentalController, t: Topic) {
         },
         border = if (hasFiles) BorderStroke(2.5.dp, ExperimentalAmber) else CardDefaults.outlinedCardBorder(),
     ) {
-        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier.padding(start = 12.dp, top = if (compact) 4.dp else 6.dp, bottom = if (compact) 4.dp else 6.dp, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Column(Modifier.weight(1f)) {
                 Text(
-                    "#${t.number}  ${t.title}",
+                    (if (t.isPr && compact) "PR " else "") + "#${t.number}  ${t.title}",
                     fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold,
-                    maxLines = 2,
+                    maxLines = if (compact) 1 else 2,
                     overflow = TextOverflow.Ellipsis,
                 )
-                Text(
-                    buildString {
-                        append(t.author)
-                        append("  ·  ${t.comments} comment${if (t.comments == 1) "" else "s"}")
-                        if (t.merged) append("  ·  merged") else if (t.draft) append("  ·  draft")
-                    },
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Text(
-                    "Updated ${TimeText.full(t.updated)}",
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                if (compact) {
+                    Text(
+                        "${t.author}  ·  ${TimeText.full(t.updated)}" + if (!t.open) "  ·  closed" else "",
+                        fontSize = 11.sp,
+                        color = soft,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                } else {
+                    Text(
+                        buildString {
+                            append(t.author)
+                            append("  ·  ${t.comments} comment${if (t.comments == 1) "" else "s"}")
+                            if (t.merged) append("  ·  merged") else if (t.draft) append("  ·  draft")
+                        },
+                        fontSize = 12.sp,
+                        color = soft,
+                    )
+                    Text(
+                        if (exp.sortBy == SortBy.OPENED) "Opened ${TimeText.full(t.created)}" else "Updated ${TimeText.full(t.updated)}",
+                        fontSize = 12.sp,
+                        color = soft,
+                    )
+                }
             }
             if (!files.isNullOrEmpty()) {
                 Spacer(Modifier.padding(horizontal = 4.dp))
                 Pill("FILES ${files.size}", ExperimentalAmber, solid = true)
             }
+            StarButton(exp.isFollowing(t.number)) { exp.toggleFollow(t) }
         }
     }
 }
@@ -288,117 +370,136 @@ private fun TopicDetail(vm: MainViewModel, t: Topic) {
     // files whose name does not say what they are are looked into, so VIEW is offered for every readable one
     LaunchedEffect(files) { exp.checkFiles(files) }
     val fileActions: @Composable (FileLink) -> Unit = { f -> FileActions(exp, f, onOpen = { openLink(uri, it) }) }
-    LazyColumn(
-        Modifier.fillMaxSize(),
-        state = listState,
-        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 56.dp, bottom = 24.dp),
-    ) {
-        item(key = "head") {
-            Column(Modifier.fillMaxWidth()) {
-                TextButton(onClick = { exp.back() }) { Text("‹  Back to the list", fontSize = 12.sp) }
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Pill(if (t.isPr) "PULL REQUEST" else "ISSUE", MaterialTheme.colorScheme.primary)
-                    Pill(
-                        when {
-                            t.merged -> "MERGED"
-                            t.open -> if (t.draft) "DRAFT" else "OPEN"
-                            else -> "CLOSED"
-                        },
-                        if (t.open) Green else MaterialTheme.colorScheme.onSurfaceVariant,
+    Box(Modifier.fillMaxSize()) {
+        LazyColumn(
+            Modifier.fillMaxSize(),
+            state = listState,
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 56.dp, bottom = 88.dp),
+        ) {
+            item(key = "head") {
+                Column(Modifier.fillMaxWidth()) {
+                    TextButton(onClick = { exp.back() }) { Text("‹  Back to the list", fontSize = 12.sp) }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            Modifier.weight(1f),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Pill(if (t.isPr) "PULL REQUEST" else "ISSUE", MaterialTheme.colorScheme.primary)
+                            Pill(
+                                when {
+                                    t.merged -> "MERGED"
+                                    t.open -> if (t.draft) "DRAFT" else "OPEN"
+                                    else -> "CLOSED"
+                                },
+                                if (t.open) Green else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            for (l in t.labels.take(3)) Pill(l.uppercase(), Amber)
+                        }
+                        StarButton(exp.isFollowing(t.number)) { exp.toggleFollow(t) }
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Text("#${t.number}  ${t.title}", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "Last activity ${TimeText.full(t.updated)}",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    for (l in t.labels.take(3)) Pill(l.uppercase(), Amber)
-                }
-                Spacer(Modifier.height(6.dp))
-                Text("#${t.number}  ${t.title}", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-                Text(
-                    "Last activity ${TimeText.full(t.updated)}",
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedButton(onClick = { openLink(uri, t.url) }) { Text("OPEN ON GITHUB", fontSize = 12.sp) }
-                    Spacer(Modifier.padding(horizontal = 4.dp))
-                    OutlinedButton(onClick = { exp.toggleSummary() }, enabled = !exp.commentsBusy) {
-                        Text(if (exp.summary == null) "QUICK SUMMARY" else "HIDE SUMMARY", fontSize = 12.sp)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedButton(onClick = { openLink(uri, t.url) }) { Text("OPEN ON GITHUB", fontSize = 12.sp) }
+                        Spacer(Modifier.padding(horizontal = 4.dp))
+                        OutlinedButton(onClick = { exp.toggleSummary() }, enabled = !exp.commentsBusy) {
+                            Text(if (exp.summary == null) "QUICK SUMMARY" else "HIDE SUMMARY", fontSize = 12.sp)
+                        }
                     }
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedButton(onClick = { exp.summarizeWithAi() }, enabled = !exp.aiBusy && !exp.commentsBusy) {
-                        Text(
-                            when {
-                                exp.aiBusy -> "WRITING…"
-                                exp.aiText != null -> "SUMMARIZE AGAIN"
-                                else -> "SUMMARIZE WITH AI"
-                            },
-                            fontSize = 12.sp,
-                        )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedButton(onClick = { exp.summarizeWithAi() }, enabled = !exp.aiBusy && !exp.commentsBusy) {
+                            Text(
+                                when {
+                                    exp.aiBusy -> "WRITING…"
+                                    exp.aiText != null -> "SUMMARIZE AGAIN"
+                                    else -> "SUMMARIZE WITH AI"
+                                },
+                                fontSize = 12.sp,
+                            )
+                        }
+                        Spacer(Modifier.padding(horizontal = 2.dp))
+                        TextButton(onClick = { exp.openKeyDialog() }) {
+                            Text(if (exp.aiKeySet) "AI key" else "Set AI key", fontSize = 12.sp)
+                        }
                     }
-                    Spacer(Modifier.padding(horizontal = 2.dp))
-                    TextButton(onClick = { exp.openKeyDialog() }) {
-                        Text(if (exp.aiKeySet) "AI key" else "Set AI key", fontSize = 12.sp)
+                    if (exp.aiBusy) {
+                        Text("Claude is reading the page…", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        LinearProgressIndicator(Modifier.fillMaxWidth().padding(vertical = 4.dp))
                     }
+                    if (exp.aiMessage.isNotEmpty()) Text(exp.aiMessage, fontSize = 12.sp, color = Red)
+                    exp.aiText?.let { AiCard(it) { exp.hideAi() } }
+                    if (exp.commentsBusy) {
+                        Text("Loading the comments…", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        LinearProgressIndicator(Modifier.fillMaxWidth().padding(vertical = 4.dp))
+                    }
+                    if (exp.commentsMessage.isNotEmpty()) Text(exp.commentsMessage, fontSize = 12.sp, color = Red)
+                    exp.summary?.let { s -> SummaryCard(s.lines, s.links) { openLink(uri, it) } }
+                    if (files.isNotEmpty()) {
+                        FilesCard(exp, files, onOpen = { openLink(uri, it) }) { post ->
+                            // the first post is the second item of the page (the head is the first), comment n the (n + 1)th
+                            val last = (listState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)
+                            scope.launch {
+                                listState.animateScrollToItem((if (post == 0) 1 else 1 + post).coerceAtMost(last))
+                                flash = post
+                            }
+                        }
+                    }
+                    if (settings.isNotEmpty()) SettingsCard(vm, settings)
+                    Spacer(Modifier.height(10.dp))
                 }
-                // logs for this page: the Contribute page packs them and comes back to open this page
-                TextButton(onClick = { vm.chooseContribute(t) }) { Text("SEND LOGS HERE", fontSize = 12.sp) }
-                if (exp.aiBusy) {
-                    Text("Claude is reading the page…", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    LinearProgressIndicator(Modifier.fillMaxWidth().padding(vertical = 4.dp))
-                }
-                if (exp.aiMessage.isNotEmpty()) Text(exp.aiMessage, fontSize = 12.sp, color = Red)
-                exp.aiText?.let { AiCard(it) { exp.hideAi() } }
-                if (exp.commentsBusy) {
-                    Text("Loading the comments…", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    LinearProgressIndicator(Modifier.fillMaxWidth().padding(vertical = 4.dp))
-                }
-                if (exp.commentsMessage.isNotEmpty()) Text(exp.commentsMessage, fontSize = 12.sp, color = Red)
-                exp.summary?.let { s -> SummaryCard(s.lines, s.links) { openLink(uri, it) } }
-                if (files.isNotEmpty()) {
-                    FilesCard(exp, files, onOpen = { openLink(uri, it) }) { post ->
-                        // the first post is the second item of the page (the head is the first), comment n the (n + 1)th
-                        val last = (listState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)
-                        scope.launch {
-                            listState.animateScrollToItem((if (post == 0) 1 else 1 + post).coerceAtMost(last))
-                            flash = post
+            }
+            item(key = "post") {
+                val body = remember(t.body) { Markdown.parse(t.body) }
+                val bodyPics = remember(body) { Markdown.pictures(body) }
+                Column(
+                    Modifier.fillMaxWidth().then(
+                        if (flash == 0) Modifier.background(ExperimentalAmber.copy(alpha = 0.14f), RoundedCornerShape(8.dp)) else Modifier
+                    ),
+                ) {
+                    Text(
+                        "${t.author}  ·  opened ${TimeText.full(t.created)}",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    if (body.isEmpty()) {
+                        Text("(no text)", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    } else {
+                        MarkdownView(body, fileActions = fileActions)
+                    }
+                    if (bodyPics.isNotEmpty()) {
+                        PictureGrid(bodyPics, Modifier.padding(top = 10.dp)) { i ->
+                            exp.openGallery("First post  ·  ${t.author}  ·  ${TimeText.stamp(t.created)}", bodyPics, i)
                         }
                     }
                 }
-                if (settings.isNotEmpty()) SettingsCard(vm, settings)
-                Spacer(Modifier.height(10.dp))
-            }
-        }
-        item(key = "post") {
-            val body = remember(t.body) { Markdown.parse(t.body) }
-            val bodyPics = remember(body) { Markdown.pictures(body) }
-            Column(
-                Modifier.fillMaxWidth().then(
-                    if (flash == 0) Modifier.background(ExperimentalAmber.copy(alpha = 0.14f), RoundedCornerShape(8.dp)) else Modifier
-                ),
-            ) {
-                Text(
-                    "${t.author}  ·  opened ${TimeText.full(t.created)}",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.height(6.dp))
-                if (body.isEmpty()) {
-                    Text("(no text)", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                } else {
-                    MarkdownView(body, fileActions = fileActions)
-                }
-                if (bodyPics.isNotEmpty()) {
-                    PictureGrid(bodyPics, Modifier.padding(top = 10.dp)) { i ->
-                        exp.openGallery("First post  ·  ${t.author}  ·  ${TimeText.stamp(t.created)}", bodyPics, i)
-                    }
+                if (!comments.isNullOrEmpty()) {
+                    Spacer(Modifier.height(14.dp))
+                    Text("${comments.size} comment${if (comments.size == 1) "" else "s"}", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                 }
             }
-            if (!comments.isNullOrEmpty()) {
-                Spacer(Modifier.height(14.dp))
-                Text("${comments.size} comment${if (comments.size == 1) "" else "s"}", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-            }
+            itemsIndexed(comments ?: emptyList()) { i, c -> CommentCard(exp, c, flash == i + 1, fileActions) }
         }
-        itemsIndexed(comments ?: emptyList()) { i, c -> CommentCard(exp, c, flash == i + 1, fileActions) }
+        // always in reach, however far the page is scrolled: the way to take part
+        Surface(
+            Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
+            tonalElevation = 3.dp,
+            shadowElevation = 6.dp,
+        ) {
+            Button(
+                onClick = { vm.wizard.askMode = true },
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            ) { Text("PREPARE LOGS") }
+        }
     }
+    if (vm.wizard.askMode) PrepareChoiceDialog(vm, t)
     if (exp.aiKeyDialog) AiKeyDialog(exp)
     exp.textDoc?.let { doc -> TextFileDialog(doc) { exp.closeText() } }
     exp.gallery?.let { g -> GalleryDialog(g) { exp.closeGallery() } }

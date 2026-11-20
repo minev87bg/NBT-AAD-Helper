@@ -92,30 +92,18 @@ fun HubScreen(vm: MainViewModel) {
             info = "Edit nbt-aad.env on the head unit: every setting of the daemon, what it does, and which are applied now.",
         ) { vm.chooseSettings() }
         Spacer(Modifier.height(12.dp))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            SoonTile(
-                icon = HubIcon.FLASK,
-                tint = Color(0xFFE9A33A),
-                title = "Experimental",
-                subtitle = "Issues and builds",
-                info = "Look through the open and closed issues and pull requests of Sq00ky's project: what people " +
-                    "report, test and suggest. SCAN FOR FILES marks the pages that share files (test builds), which " +
-                    "can be installed from there. QUICK SUMMARY gives the gist of a page and its links, and SUMMARIZE WITH AI has Claude write it (with your own Anthropic key).",
-                modifier = Modifier.weight(1f),
-                onClick = { vm.chooseExperimental() },
-            )
-            SoonTile(
-                icon = HubIcon.HEART,
-                tint = Color(0xFFE56B94),
-                title = "Contribute",
-                subtitle = "Send logs",
-                info = "Packs the daemon's logs from the head unit into one zip, with the WiFi password and the VIN " +
-                    "hidden, and opens the issue page so you can attach it. Do it before you restart the car: the " +
-                    "logs are in memory and are gone after a reboot.",
-                modifier = Modifier.weight(1f),
-                onClick = { vm.chooseContribute() },
-            )
-        }
+        HeroTile(
+            title = "Browse community for more",
+            subtitle = "Issues, builds and tests",
+            info = "Read what people report, test and suggest in Sq00ky's project: issues and pull requests, sorted by " +
+                "recent activity or by the day they were opened, with the pages that share files (test builds, logs) " +
+                "marked. Follow the pages you care about with the star.\n\n" +
+                "On a page, PREPARE LOGS takes you through a test step by step and sends its logs to that page. " +
+                "More ways to take part will come here.",
+            icon = HubIcon.COMMUNITY,
+            colors = listOf(Color(0xFFF2C46E), Color(0xFFD99A33)),
+            ink = Color(0xFF3A2500),
+        ) { vm.chooseExperimental() }
         Spacer(Modifier.height(8.dp))
         TextButton(onClick = { vm.showLog = true }) { Text("app log", fontSize = 12.sp) }
         Spacer(Modifier.height(16.dp))
@@ -129,25 +117,33 @@ private val TileShape = RoundedCornerShape(26.dp)
 
 /** The main choice: a big green tile (a soft sage green, easy on the eye, but the only coloured tile). The (i) in its corner opens what it is for. */
 @Composable
-private fun HeroTile(title: String, subtitle: String, info: String, onClick: () -> Unit) {
+private fun HeroTile(
+    title: String,
+    subtitle: String,
+    info: String,
+    icon: HubIcon = HubIcon.INSTALL,
+    colors: List<Color> = listOf(Color(0xFF7BC98A), Color(0xFF4E9F5E)),
+    ink: Color = HeroText,
+    onClick: () -> Unit,
+) {
     var showInfo by remember { mutableStateOf(false) }
     Box(
         Modifier.fillMaxWidth().height(196.dp).clip(TileShape)
-            .background(Brush.linearGradient(listOf(Color(0xFF7BC98A), Color(0xFF4E9F5E))))
+            .background(Brush.linearGradient(colors))
             .clickable(onClick = onClick),
     ) {
         Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.SpaceBetween) {
             Box(
                 Modifier.size(60.dp).clip(RoundedCornerShape(20.dp)).background(Color.Black.copy(alpha = 0.14f)),
                 contentAlignment = Alignment.Center,
-            ) { HubIconView(HubIcon.INSTALL, HeroText, 34.dp) }
+            ) { HubIconView(icon, ink, 34.dp) }
             Column {
-                Text(title, fontSize = 24.sp, fontWeight = FontWeight.Bold, color = HeroText)
-                Text(subtitle, fontSize = 13.sp, color = HeroText.copy(alpha = 0.72f))
+                Text(title, fontSize = 24.sp, fontWeight = FontWeight.Bold, color = ink)
+                Text(subtitle, fontSize = 13.sp, color = ink.copy(alpha = 0.72f))
             }
         }
         Box(Modifier.align(Alignment.TopEnd).padding(14.dp)) {
-            CompositionLocalProvider(LocalContentColor provides HeroText) { InfoDot { showInfo = true } }
+            CompositionLocalProvider(LocalContentColor provides ink) { InfoDot { showInfo = true } }
             if (showInfo) InfoBalloon(title, info, mono = false) { showInfo = false }
         }
     }
@@ -176,49 +172,6 @@ private fun WideTile(icon: HubIcon, tint: Color, title: String, subtitle: String
     }
 }
 
-/** A half-width tile that is not ready yet: dimmed, with "soon" where the subtitle would be. The (i) still works. */
-@Composable
-private fun SoonTile(
-    icon: HubIcon,
-    tint: Color,
-    title: String,
-    info: String,
-    modifier: Modifier = Modifier,
-    subtitle: String? = null,
-    onClick: (() -> Unit)? = null,
-) {
-    var showInfo by remember { mutableStateOf(false) }
-    val ready = onClick != null
-    Box(
-        modifier.height(150.dp).clip(TileShape)
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = if (ready) 0.9f else 0.45f))
-            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
-    ) {
-        Column(
-            Modifier.fillMaxSize().padding(16.dp).alpha(if (ready) 1f else 0.62f),
-            verticalArrangement = Arrangement.SpaceBetween,
-        ) {
-            IconSquare(icon, tint, 48.dp)
-            Column {
-                Text(title, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-                Spacer(Modifier.height(6.dp))
-                if (ready && subtitle != null) {
-                    Text(subtitle, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                } else {
-                    Box(
-                        Modifier.clip(CircleShape).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f))
-                            .padding(horizontal = 8.dp, vertical = 3.dp),
-                    ) { Text("SOON", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp) }
-                }
-            }
-        }
-        Box(Modifier.align(Alignment.TopEnd).padding(14.dp)) {
-            InfoDot { showInfo = true }
-            if (showInfo) InfoBalloon(title, info, mono = false) { showInfo = false }
-        }
-    }
-}
-
 @Composable
 private fun IconSquare(icon: HubIcon, tint: Color, size: Dp) {
     Box(
@@ -228,7 +181,7 @@ private fun IconSquare(icon: HubIcon, tint: Color, size: Dp) {
 }
 
 /** The icons of page 2, drawn here (24 x 24 grid, round line ends), so no icon library is needed. */
-private enum class HubIcon { INSTALL, SETTINGS, FLASK, HEART }
+private enum class HubIcon { INSTALL, SETTINGS, COMMUNITY }
 
 @Composable
 private fun HubIconView(icon: HubIcon, color: Color, size: Dp) {
@@ -253,40 +206,28 @@ private fun HubIconView(icon: HubIcon, color: Color, size: Dp) {
                 drawCircle(color, radius = 2.4f * k, center = o(15f, 7f), style = stroke)
                 drawCircle(color, radius = 2.4f * k, center = o(9f, 17f), style = stroke)
             }
-            HubIcon.FLASK -> {
-                line(9.5f, 3f, 14.5f, 3f)
-                line(7.8f, 14.5f, 16.2f, 14.5f)
-                val path = Path().apply {
-                    moveTo(10.5f * k, 3f * k)
-                    lineTo(10.5f * k, 9f * k)
-                    lineTo(5.3f * k, 17.6f * k)
-                    quadraticBezierTo(4.3f * k, 20.5f * k, 7f * k, 20.5f * k)
-                    lineTo(17f * k, 20.5f * k)
-                    quadraticBezierTo(19.7f * k, 20.5f * k, 18.7f * k, 17.6f * k)
-                    lineTo(13.5f * k, 9f * k)
-                    lineTo(13.5f * k, 3f * k)
+            HubIcon.COMMUNITY -> {
+                // two people: a head each and the line of the shoulders
+                drawCircle(color, radius = 3.2f * k, center = o(9f, 8f), style = stroke)
+                drawCircle(color, radius = 2.6f * k, center = o(17.2f, 9f), style = stroke)
+                val near = Path().apply {
+                    moveTo(3f * k, 19.5f * k)
+                    quadraticBezierTo(3f * k, 13.5f * k, 9f * k, 13.5f * k)
+                    quadraticBezierTo(15f * k, 13.5f * k, 15f * k, 19.5f * k)
                 }
-                drawPath(path, color, style = stroke)
-            }
-            HubIcon.HEART -> {
-                val path = Path().apply {
-                    moveTo(12f * k, 20.5f * k)
-                    cubicTo(5f * k, 15.5f * k, 3.5f * k, 11.5f * k, 3.5f * k, 8.8f * k)
-                    cubicTo(3.5f * k, 6.4f * k, 5.4f * k, 4.6f * k, 7.6f * k, 4.6f * k)
-                    cubicTo(9.5f * k, 4.6f * k, 11.2f * k, 5.6f * k, 12f * k, 7.4f * k)
-                    cubicTo(12.8f * k, 5.6f * k, 14.5f * k, 4.6f * k, 16.4f * k, 4.6f * k)
-                    cubicTo(18.6f * k, 4.6f * k, 20.5f * k, 6.4f * k, 20.5f * k, 8.8f * k)
-                    cubicTo(20.5f * k, 11.5f * k, 19f * k, 15.5f * k, 12f * k, 20.5f * k)
-                    close()
+                drawPath(near, color, style = stroke)
+                val far = Path().apply {
+                    moveTo(16.8f * k, 14f * k)
+                    quadraticBezierTo(21f * k, 14f * k, 21f * k, 18.5f * k)
                 }
-                drawPath(path, color, style = stroke)
+                drawPath(far, color, style = stroke)
             }
         }
     }
 }
 
 @Composable
-private fun DraftDialog(vm: MainViewModel) {
+internal fun DraftDialog(vm: MainViewModel) {
     AlertDialog(
         onDismissRequest = {},
         title = { Text("Unfinished session found") },
@@ -308,7 +249,7 @@ private fun DraftDialog(vm: MainViewModel) {
 @Composable
 fun InstallScreen(vm: MainViewModel) {
     val inst = vm.inst
-    BackHandler { vm.backToHub() }
+    BackHandler { if (vm.fromWizard) vm.backToWizard() else vm.backToHub() }
     val list = rememberLazyListState()
     LaunchedEffect(inst.view) { if (inst.view != null) list.animateScrollToItem(0) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
@@ -319,6 +260,8 @@ fun InstallScreen(vm: MainViewModel) {
         item(key = "__head") {
             Column(Modifier.fillMaxWidth()) {
                 Spacer(Modifier.height(52.dp))
+                // only when this page was opened from the wizard
+                if (vm.fromWizard) BackToWizardButton(vm)
                 Text("Install / update NBT Android Auto", fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(4.dp))
                 Text(
@@ -504,6 +447,18 @@ private fun UnitBody(inst: InstallController, u: UnitStatus, onChange: () -> Uni
 
     // ---- the settings that nbt-aad.env applies ----
     Spacer(Modifier.height(12.dp))
+    AppliedSettings(inst, u)
+    OutlinedButton(
+        onClick = onChange,
+        enabled = inst.job?.status != RunStatus.RUNNING,
+        modifier = Modifier.padding(top = 6.dp),
+    ) { Text("CHANGE", fontSize = 12.sp) }
+}
+
+/** The settings that nbt-aad.env switches on, as the head unit has them (what "Current status" and the wizard list). */
+@Composable
+internal fun AppliedSettings(inst: InstallController, u: UnitStatus) {
+    val soft = MaterialTheme.colorScheme.onSurfaceVariant
     val applied = inst.appliedOptions()
     Text("Settings applied (nbt-aad.env)", fontSize = 11.sp, color = soft)
     when {
@@ -518,11 +473,12 @@ private fun UnitBody(inst: InstallController, u: UnitStatus, onChange: () -> Uni
         u.envMissing -> Text("There is no nbt-aad.env: every setting runs at its default.", fontSize = 12.sp)
         else -> Text("nbt-aad.env could not be read.", fontSize = 12.sp, color = soft)
     }
-    OutlinedButton(
-        onClick = onChange,
-        enabled = inst.job?.status != RunStatus.RUNNING,
-        modifier = Modifier.padding(top = 6.dp),
-    ) { Text("CHANGE", fontSize = 12.sp) }
+}
+
+/** On the pages the wizard sends the person to: the way back to where the wizard was left. */
+@Composable
+internal fun BackToWizardButton(vm: MainViewModel, modifier: Modifier = Modifier) {
+    OutlinedButton(onClick = { vm.backToWizard() }, modifier = modifier.fillMaxWidth()) { Text("BACK TO WIZARD") }
 }
 
 @Composable

@@ -8,6 +8,8 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.nbtaad.editor.contribute.ContributeController
+import com.nbtaad.editor.contribute.WizardController
+import com.nbtaad.editor.contribute.WizardStep
 import com.nbtaad.editor.data.CatalogStore
 import com.nbtaad.editor.data.CustomOptionStore
 import com.nbtaad.editor.data.Storage
@@ -45,7 +47,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
-enum class Screen { DETECT, HUB, OPTIONS, INSTALL, EXPERIMENTAL, CONTRIBUTE }
+enum class Screen { DETECT, HUB, OPTIONS, INSTALL, EXPERIMENTAL, CONTRIBUTE, WIZARD }
 enum class UpdatePhase { IDLE, CHECKING, CURRENT, AVAILABLE, DOWNLOADING, FAILED }
 enum class SaveStatus { RUNNING, OK, FAIL }
 enum class LineKind { INFO, OK, ERROR }
@@ -114,11 +116,22 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         },
     )
 
-    /** The Contribute page: the daemon's logs from the head unit, packed into a zip for an issue. */
+    /** The manual way of PREPARE LOGS: the daemon's logs from the head unit, packed into a zip for an issue. */
     val contribute = ContributeController(
         ctx, viewModelScope, host = { detect.hu }, rescan = { rescanForHost() }, problem = { scanProblem },
         headUnitVersion = { inst.unit?.installedVersion },
     )
+
+    /** The log wizard: from "I want to test this" to the logs on the page, with the app's own pages as steps on the way. */
+    val wizard = WizardController(
+        ctx, viewModelScope, host = { detect.hu }, zgw = { detect.zgw },
+        onHost = { hu, open -> detect = detect.copy(hu = hu, ssh = open) },
+        contribute = contribute,
+    )
+
+    /** True while the settings page or the install page was opened from the wizard: they then offer the way back. */
+    var fromWizard by mutableStateOf(false); private set
+
     var themeMode by mutableStateOf(themePrefs.read())
 
     fun cycleTheme() {
@@ -593,10 +606,66 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         screen = Screen.EXPERIMENTAL
     }
 
-    /** "Contribute": the head unit's logs into a zip for an issue ([topic]: the page it is for, when it is opened from there). */
-    fun chooseContribute(topic: Topic? = null) {
-        contribute.open(topic)
+    // ---------------- PREPARE LOGS ----------------
+
+    /** USE WIZARD: the guided way for the page [t]. */
+    fun prepareWizard(t: Topic) {
+        fromWizard = false
+        wizard.start(t)
+        screen = Screen.WIZARD
+    }
+
+    /** MANUAL: the page where the files are ticked by hand, for the page [t]. */
+    fun prepareManual(t: Topic) {
+        wizard.askMode = false
+        contribute.open(t)
         screen = Screen.CONTRIBUTE
+    }
+
+    /** Leaves the manual page for the page it was started from. */
+    fun backFromContribute() {
+        screen = if (exp.selected != null) Screen.EXPERIMENTAL else Screen.HUB
+    }
+
+    /** CURRENT: the version that is on the head unit. On to the settings, which are read from it. */
+    fun wizardCurrent() {
+        wizard.toSettings()
+        inst.readUnit()
+    }
+
+    /** DIFFERENT: the install page, with a way back to the wizard. */
+    fun wizardDifferent() {
+        fromWizard = true
+        inst.open()
+        screen = Screen.INSTALL
+    }
+
+    /** CHANGE in the wizard: the settings page, with a way back to the wizard. */
+    fun wizardChange() {
+        fromWizard = true
+        chooseSettings()
+    }
+
+    /** BACK TO WIZARD (or back) on a page the wizard sent the person to: where the wizard was left, with the head unit read again. */
+    fun backToWizard() {
+        fromWizard = false
+        if (wizard.step == WizardStep.VERSION) wizard.toSettings()
+        inst.readUnit()
+        screen = Screen.WIZARD
+    }
+
+    /** BACK in the wizard: a step back, and from the first one out to the page. */
+    fun wizardBack() {
+        if (contribute.packing) return
+        if (!wizard.previous()) {
+            wizard.leave()
+            screen = Screen.EXPERIMENTAL
+        }
+    }
+
+    fun wizardFinish() {
+        wizard.leave()
+        screen = Screen.EXPERIMENTAL
     }
 
     /** A setting named in an issue is offered for "Additional options" of the settings page. */
