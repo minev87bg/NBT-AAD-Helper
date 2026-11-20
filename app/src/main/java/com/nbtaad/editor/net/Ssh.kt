@@ -94,9 +94,10 @@ class SshSession(host: String) : AutoCloseable {
         onOut: ((Long) -> Unit)? = null,
         /** Asked often; true stops the command and throws [SshCancelled]. */
         cancelled: (() -> Boolean)? = null,
-        onSent: ((Long) -> Unit)? = null,
         /** When positive: stop (and close the channel) once this many bytes of output have come; the exit status is then 0. */
         maxBytes: Long = -1,
+        /** Last, so that it can be given as the trailing lambda. */
+        onSent: ((Long) -> Unit)? = null,
     ): Result {
         val ch = session.openChannel("exec") as ChannelExec
         ch.setCommand(cmd)
