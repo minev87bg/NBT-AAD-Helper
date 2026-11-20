@@ -33,7 +33,7 @@ class SessionScriptsTest {
     private val s3 = session("v1.9.115", listOf("2026-11-20 17:11:23", "2026-11-20 17:15:00"), 2500)
 
     private fun run(script: String): ByteArray {
-        val p = ProcessBuilder("/bin/sh", "-c", script).redirectError(ProcessBuilder.Redirect.DISCARD).start()
+        val p = ProcessBuilder("/bin/sh", "-c", script).redirectError(File("/dev/null")).start()
         val out = p.inputStream.readBytes()
         p.waitFor()
         return out
