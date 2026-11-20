@@ -41,7 +41,25 @@ class Outcome(
  * shell does itself; the files are read and written through the network paths of the other processor.
  */
 object HeadUnit {
-    class Layout(val aa: String, val plugin: String?)
+    /**
+     * Where Android Auto is. [aa] is the folder of the program; [env] the folder of nbt-aad.env (the same, except for
+     * NBTApps, which keeps the file in a data folder of its own); [nbtApps]: NBTApps put it there, not a person's hands.
+     */
+    class Layout(val aa: String, val plugin: String?, val nbtApps: Boolean = false, val env: String = aa)
+
+    /** Why this app does not install over an NBTApps install. */
+    const val NBTAPPS_NOTE =
+        "Android Auto on this head unit was installed with NBTApps. Update or remove it there: an install from here " +
+            "would put a second copy in /opt/aa, which NBTApps removes again. Settings, logs and the version check work here."
+
+    private fun layoutOf(out: String): Layout? {
+        val loc = RemoteScripts.parseLocated(out)
+        return when {
+            loc.aa != null -> Layout(loc.aa, loc.plugin)
+            loc.nbtApp != null -> Layout(loc.nbtApp, loc.plugin, nbtApps = true, env = loc.nbtData ?: loc.nbtApp)
+            else -> null
+        }
+    }
 
     private fun timeoutFor(bytes: Int): Long = 60_000L + bytes / 8
 
@@ -65,18 +83,19 @@ object HeadUnit {
     private fun diagnoseFolders(ssh: SshSession): String =
         ssh.exec(
             "echo '/opt:'; ls /opt 2>&1 | head -12; echo '/net:'; ls /net 2>&1 | head -12; " +
-                "echo 'hu-omap opt:'; ls /net/hu-omap/fs/sda0/opt 2>&1 | head -12"
-        ).text.trim().take(600)
+                "echo 'hu-omap opt:'; ls /net/hu-omap/fs/sda0/opt 2>&1 | head -12; " +
+                "echo 'nbtapp:'; ls /var/opt/nbtapp /var/opt/nbtapp/apps /var/opt/nbtapp/data 2>&1 | head -12; " +
+                "echo 'hu-omap nbtapp:'; ls /net/hu-omap/var/opt/nbtapp /net/hu-omap/var/opt/nbtapp/apps 2>&1 | head -12"
+        ).text.trim().take(900)
 
     private fun notFound(ssh: SshSession): IOException = IOException(
-        "The NBT-AAD folder (/opt/aa) was not found on the head unit. Is NBT-AAD installed?\n" +
+        "The NBT-AAD folder (/opt/aa, or the folders of NBTApps in /var/opt/nbtapp) was not found on the head unit. " +
+            "Is NBT-AAD installed?\n" +
             "What the SSH shell can see:\n" + diagnoseFolders(ssh)
     )
 
     private fun locate(ssh: SshSession): Layout {
-        val (aa, pl) = RemoteScripts.parseLocate(ssh.exec(RemoteScripts.locate()).text)
-        if (aa == null) throw notFound(ssh)
-        return Layout(aa, pl)
+        return layoutOf(ssh.exec(RemoteScripts.locate()).text) ?: throw notFound(ssh)
     }
 
     /** The first look at the head unit, in one command: where the folders are, and whether Android Auto runs. */
@@ -84,15 +103,15 @@ object HeadUnit {
 
     private fun probe(ssh: SshSession): Probe {
         val text = ssh.exec(RemoteScripts.probe(), timeoutMs = 60_000).text
-        val (aa, pl) = RemoteScripts.parseLocate(text)
-        if (aa == null) throw notFound(ssh)
-        return Probe(Layout(aa, pl), RemoteScripts.parseProc(text))
+        val lay = layoutOf(text) ?: throw notFound(ssh)
+        return Probe(lay, RemoteScripts.parseProc(text))
     }
 
     private fun readStatus(ssh: SshSession, lay: Layout, withEnv: Boolean = false): UnitStatus =
         RemoteScripts.parseStatus(
             lay.aa, lay.plugin,
-            ssh.exec(RemoteScripts.status(lay.aa, lay.plugin, withEnv), timeoutMs = 60_000).text,
+            ssh.exec(RemoteScripts.status(lay.aa, lay.plugin, withEnv, lay.env), timeoutMs = 60_000).text,
+            nbtApps = lay.nbtApps,
         )
 
     /**
@@ -232,7 +251,7 @@ object HeadUnit {
                 out += if (lay == null) {
                     FileRead("nbt-aad.env", null, "the NBT-AAD folder was not found")
                 } else {
-                    read("nbt-aad.env", "${lay.aa}/nbt-aad.env", -1)
+                    read("nbt-aad.env", "${lay.env}/nbt-aad.env", -1)
                 }
             }
             /** One session cut out of a log: with dd where the head unit has it, else with read and cat; each is checked to start with the header. */
@@ -286,7 +305,7 @@ object HeadUnit {
             val lay = try { locate(ssh) } catch (e: Exception) { null }
             val r = ssh.exec(RemoteScripts.diagnose(), timeoutMs = 40_000)
             buildString {
-                appendLine("NBT-AAD folder: ${lay?.aa ?: "not found"}")
+                appendLine("NBT-AAD folder: ${lay?.aa ?: "not found"}${if (lay?.nbtApps == true) " (installed by NBTApps; nbt-aad.env in ${lay.env})" else ""}")
                 appendLine("Plugin folder: ${lay?.plugin ?: "not found"}")
                 append(r.text.trim())
                 if (r.err.isNotBlank()) append("\n[errors]\n" + r.err.trim())
@@ -416,6 +435,7 @@ object HeadUnit {
             rep.say("Logged in (${clock.step()}).", Level.INFO)
             val pr = probe(ssh)
             val lay = pr.layout
+            if (lay.nbtApps) throw IOException(NBTAPPS_NOTE)
             rep.say("NBT-AAD folder: ${lay.aa}", Level.INFO)
             if (plugin.isNotEmpty()) {
                 val pl = lay.plugin ?: throw IOException(
@@ -526,6 +546,7 @@ object HeadUnit {
             rep.say("Logged in (${clock.step()}).", Level.INFO)
             val pr = probe(ssh)
             val lay = pr.layout
+            if (lay.nbtApps) throw IOException(NBTAPPS_NOTE)
             val before = readStatus(ssh, lay)
             val doDaemon = daemon && before.hasPreviousDaemon
             val doPlugin = plugin && before.hasOldPlugin && lay.plugin != null

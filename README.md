@@ -1,9 +1,25 @@
 # NBT AAD Tool
 
-Android app that edits `/opt/aa/nbt-aad.env` on a BMW / Toyota Supra NBT Evo head unit running
-[NBT-AAD](https://github.com/Sq00ky/Supra-iDrive6-Android-Auto) (native Android Auto).
+**Android app to install, configure and troubleshoot [NBT-AAD](https://github.com/Sq00ky/Supra-iDrive6-Android-Auto)
+(native Android Auto) on a BMW NBT Evo / iDrive 6 head unit, such as the Toyota Supra J29's, from your phone.**
+No laptop, no USB stick: the app talks to the head unit over WiFi (SSH).
 
-Status: tested in a car for detection, reset, read, save, install and going back. Versions 1.0.16 to 1.0.18 (every reset scans for the car first, SSH actions look for the car again, new page 2, Skip, app log) have not been tried in a car yet. Experimental is built (v1.0.20; v1.0.21 adds GitHub-style formatting and an AI summary), CONTRIBUTE is announced but not built.
+| | |
+|---|---|
+| **Install / update** | Put a release from Sq00ky's Releases page (or your own files) on the head unit, with the previous version kept and one button to go back. |
+| **Change a setting** | Every documented `nbt-aad.env` setting as a list with choices and explanations, read from and saved to the head unit, with backups. |
+| **Community** | Browse the project's issues and pull requests, and prepare the logs a bug report needs (VIN, WiFi password and GPS positions are hidden). |
+| **Car connection** | Finds the head unit, joins the car's WiFi, and tells you what to do when the connection is lost. |
+| **Updates itself** | Checks GitHub for a newer version at start-up. |
+
+Works with Android Auto installed by hand (`/opt/aa`, as in the project's guide) and with Android Auto installed by
+[NBTApps](https://github.com/tom-pryor/nbtapps): settings, logs and the version check work with both; installing
+and going back are for the hand install (with NBTApps, update in NBTApps).
+
+Status: **beta**. Written and tested by one person on one car; reports and logs are welcome in
+[Issues](https://github.com/minev87bg/NBT-AAD-Helper/issues). This is an unofficial tool: it is not made by or
+affiliated with Sq00ky, BMW, Toyota or Google. It changes software on your car's head unit; you use it at your own
+risk. License: GPL-3.0.
 
 ## Get the APK
 Every successful build is published as a release (Releases page, newest on top, `NBT-AAD-Tool-v1.0.N.apk`).

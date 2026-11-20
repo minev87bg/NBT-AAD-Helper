@@ -183,7 +183,12 @@ object EnvRemote {
      * folder is /opt/aa. From the login shell the same folder is reachable through the QNX network path,
      * so try the plain path first and then the network paths.
      */
-    private val DIRS = listOf("/opt/aa", "/net/hu-omap/fs/sda0/opt/aa", "/net/hu-omap/opt/aa")
+    private val DIRS = listOf(
+        "/opt/aa", "/net/hu-omap/fs/sda0/opt/aa", "/net/hu-omap/opt/aa",
+        // installed with NBTApps: its data folder for the package holds nbt-aad.env (see RemoteScripts.NBTAPPS_ID)
+        "/var/opt/nbtapp/data/${com.nbtaad.editor.install.RemoteScripts.NBTAPPS_ID}",
+        "/net/hu-omap/var/opt/nbtapp/data/${com.nbtaad.editor.install.RemoteScripts.NBTAPPS_ID}",
+    )
     const val FILE = "nbt-aad.env"
 
     sealed class ReadResult {
@@ -201,7 +206,9 @@ object EnvRemote {
     private fun diagnose(ssh: SshSession): String {
         val r = ssh.exec(
             "echo '/opt:'; ls /opt 2>&1 | head -12; echo '/net:'; ls /net 2>&1 | head -12; " +
-                "echo 'hu-omap opt:'; ls /net/hu-omap/fs/sda0/opt 2>&1 | head -12"
+                "echo 'hu-omap opt:'; ls /net/hu-omap/fs/sda0/opt 2>&1 | head -12; " +
+                "echo 'nbtapp:'; ls /var/opt/nbtapp /var/opt/nbtapp/apps /var/opt/nbtapp/data 2>&1 | head -12; " +
+                "echo 'hu-omap nbtapp:'; ls /net/hu-omap/var/opt/nbtapp /net/hu-omap/var/opt/nbtapp/data 2>&1 | head -12"
         )
         return r.text.trim().take(600)
     }
@@ -224,7 +231,7 @@ object EnvRemote {
         progress("Logging in to $host…")
         SshSession(host).use { ssh ->
             val dir = findDir(ssh)
-                ?: throw IOException("Could not find the NBT-AAD folder (/opt/aa) on the head unit. Is NBT-AAD installed?")
+                ?: throw IOException("Could not find the NBT-AAD folder (/opt/aa, or NBTApps' folders in /var/opt/nbtapp) on the head unit. Is NBT-AAD installed?")
             val path = "$dir/$FILE"
 
             progress("Making the partition writable…")

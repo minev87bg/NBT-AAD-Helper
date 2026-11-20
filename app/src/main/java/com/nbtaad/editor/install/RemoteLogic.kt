@@ -34,6 +34,8 @@ class UnitStatus(
     val daemonUnreadable: Boolean = false,
     /** The build the daemon named in its RAM log when it last started (null: no such log, or no such line in it). */
     val runningVersion: String? = null,
+    /** Android Auto was put on this head unit by NBTApps: [aaDir] is NBTApps' folder of the program, not /opt/aa. */
+    val nbtApps: Boolean = false,
 ) {
     val hasDaemon: Boolean get() = Names.DAEMON in files
     val hasPreviousDaemon: Boolean get() = "nbt-aad.old" in files
@@ -58,12 +60,12 @@ class UnitStatus(
     fun withDaemonFile(file: DaemonFile?): UnitStatus =
         UnitStatus(
             aaDir, pluginDir, files, pluginFiles, hasOldPlugin, version, envText, envMissing,
-            daemonFile = file, daemonUnreadable = file == null, runningVersion = runningVersion,
+            daemonFile = file, daemonUnreadable = file == null, runningVersion = runningVersion, nbtApps = nbtApps,
         )
 
     /** One line for the log: where the folders are and what is in them. */
     fun describe(): String =
-        "folder $aaDir, plugin $pluginDir, version $installedVersion${if (versionFromLog) " (from the daemon's log)" else ""}, files " +
+        "folder $aaDir${if (nbtApps) " (installed by NBTApps)" else ""}, plugin $pluginDir, version $installedVersion${if (versionFromLog) " (from the daemon's log)" else ""}, files " +
             files.entries.joinToString { "${it.key}(${it.value.size}${if (it.value.executable) ",exec" else ""})" } +
             ", ${pluginFiles.size} plugin files, old plugin $hasOldPlugin" +
             (daemonFile?.let { ", daemon read back ${it.size} bytes sha256 ${it.sha256.take(16)}" }
@@ -85,6 +87,13 @@ class ProcScan(val scanned: Boolean, val here: List<Int>, val onHuOmap: List<Int
  */
 object RemoteScripts {
     const val PLUGIN_SUBPATH = "opt/hmi/ID5/data/ro/Plugins/NbtAad"
+
+    /**
+     * The id of Sq00ky's package for NBTApps (Tom Pryor's app store for the head unit). NBTApps keeps the daemon in
+     * /var/opt/nbtapp/apps/<id> and its nbt-aad.env in /var/opt/nbtapp/data/<id>, not in /opt/aa; the plugin goes to the
+     * same folder as in a manual install.
+     */
+    const val NBTAPPS_ID = "com.github.sq00ky.android-auto"
     /** The places the head unit's folders show up as, seen from the SSH login shell (see EnvRemote). */
     val PREFIXES = listOf("", "/net/hu-omap/fs/sda0", "/net/hu-omap")
 
@@ -94,9 +103,9 @@ object RemoteScripts {
     /** Tests set this to "" to see how the scripts do with only the short PATH of the car. */
     @JvmField var pathFix: String = PATH_FIX
 
-    private fun sh(body: String, aa: String = "", pl: String = ""): String =
+    private fun sh(body: String, aa: String = "", pl: String = "", env: String = aa): String =
         (pathFix + body.trimIndent())
-            .replace("@AA@", aa).replace("@PL@", pl).replace("@HUAA@", onHuOmapPath(aa))
+            .replace("@AA@", aa).replace("@PL@", pl).replace("@ENV@", env).replace("@HUAA@", onHuOmapPath(aa))
             .replace('¤', '$')
 
     /** A path as the processor that runs Android Auto names it: /net/hu-omap/fs/sda0/opt/aa is /fs/sda0/opt/aa there. */
@@ -110,6 +119,8 @@ object RemoteScripts {
           echo "P ¤p"
           if [ -d "¤p/opt/aa" ]; then echo "AA ¤p/opt/aa"; fi
           if [ -d "¤p/$PLUGIN_SUBPATH" ]; then echo "PL ¤p/$PLUGIN_SUBPATH"; fi
+          if [ -d "¤p/var/opt/nbtapp/apps/$NBTAPPS_ID" ]; then echo "NA ¤p/var/opt/nbtapp/apps/$NBTAPPS_ID"; fi
+          if [ -d "¤p/var/opt/nbtapp/data/$NBTAPPS_ID" ]; then echo "ND ¤p/var/opt/nbtapp/data/$NBTAPPS_ID"; fi
         done
     """.trimIndent()
 
@@ -176,9 +187,9 @@ object RemoteScripts {
      * line makes sure the end marker starts on a line of its own, whether or not the file ends with a line break.
      */
     private val ENV_PART = """
-        if [ -f @AA@/nbt-aad.env ]; then
+        if [ -f @ENV@/nbt-aad.env ]; then
           echo "ENV-BEGIN"
-          cat @AA@/nbt-aad.env
+          cat @ENV@/nbt-aad.env
           echo ""
           echo "ENV-END"
         else
@@ -337,14 +348,37 @@ object RemoteScripts {
         return rows.firstNotNullOfOrNull { it.aa } to rows.firstNotNullOfOrNull { it.pl }
     }
 
+    /** Where [locate] found what: the manual install in /opt/aa, and the folders NBTApps made (its program and its data). */
+    class Located(val aa: String?, val plugin: String?, val nbtApp: String?, val nbtData: String?)
+
+    /** Everything [locate] printed, as [Located]; each of the four is the first one found, a plugin folder next to the program first. */
+    fun parseLocated(out: String): Located {
+        class Row { var aa: String? = null; var pl: String? = null; var na: String? = null; var nd: String? = null }
+        val rows = ArrayList<Row>()
+        for (raw in out.lines()) {
+            val line = raw.trim()
+            when {
+                line == "P" || line.startsWith("P ") -> rows += Row()
+                line.startsWith("AA ") -> rows.lastOrNull()?.aa = line.substring(3).trim()
+                line.startsWith("PL ") -> rows.lastOrNull()?.pl = line.substring(3).trim()
+                line.startsWith("NA ") -> rows.lastOrNull()?.na = line.substring(3).trim()
+                line.startsWith("ND ") -> rows.lastOrNull()?.nd = line.substring(3).trim()
+            }
+        }
+        val (aa, pl) = parseLocate(out)
+        // the data folder of the same prefix as the program folder, when there is one
+        val na = rows.firstOrNull { it.na != null }
+        return Located(aa, pl, na?.na, na?.nd ?: rows.firstNotNullOfOrNull { it.nd })
+    }
+
     /**
      * What is in the folders. Sizes are asked of `wc` when the head unit has it and left empty otherwise. With
      * [withEnv] the text of nbt-aad.env follows (see [parseStatus]).
      */
-    fun status(aa: String, pl: String?, withEnv: Boolean = false): String =
-        sh(statusPart(pl != null) + "\n" + BUILD_PART + (if (withEnv) "\n" + ENV_PART else "") + "\nexit 0", aa, pl ?: "")
+    fun status(aa: String, pl: String?, withEnv: Boolean = false, env: String = aa): String =
+        sh(statusPart(pl != null) + "\n" + BUILD_PART + (if (withEnv) "\n" + ENV_PART else "") + "\nexit 0", aa, pl ?: "", env)
 
-    fun parseStatus(aa: String?, pl: String?, out: String): UnitStatus {
+    fun parseStatus(aa: String?, pl: String?, out: String, nbtApps: Boolean = false): UnitStatus {
         val files = LinkedHashMap<String, FileState>()
         val plugin = LinkedHashMap<String, Long>()
         var oldPlugin = false
@@ -387,7 +421,7 @@ object RemoteScripts {
                 line.startsWith("NBT-AAD-VERSION=") -> version = line.removePrefix("NBT-AAD-VERSION=")
             }
         }
-        return UnitStatus(aa, pl, files, plugin, oldPlugin, version, envText, envMissing, runningVersion = runningVersion)
+        return UnitStatus(aa, pl, files, plugin, oldPlugin, version, envText, envMissing, runningVersion = runningVersion, nbtApps = nbtApps)
     }
 
     /** A line of the daemon's log that names its build: `Build: v1.9.112 (Nov 18 2026 12:34:56)`. */

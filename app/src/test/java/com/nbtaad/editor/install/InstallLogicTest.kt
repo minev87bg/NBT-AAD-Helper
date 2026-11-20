@@ -491,6 +491,37 @@ class InstallLogicTest {
         assertTrue(ReleaseLogic.infoText(r.copy(notes = "  ", title = "v1.9.116", prerelease = false), "x").endsWith("(none written)"))
     }
 
+    // ---- Android Auto installed by NBTApps ----
+
+    @Test
+    fun androidAutoInstalledByNbtAppsIsFoundInItsOwnFolders() {
+        val id = RemoteScripts.NBTAPPS_ID
+        // the login sees the other processor's folders as /net/hu-omap/...: no /opt/aa, NBTApps' folders and the plugin
+        val out = "P \nP /net/hu-omap/fs/sda0\nPL /net/hu-omap/fs/sda0/opt/hmi/ID5/data/ro/Plugins/NbtAad\n" +
+            "P /net/hu-omap\nNA /net/hu-omap/var/opt/nbtapp/apps/$id\nND /net/hu-omap/var/opt/nbtapp/data/$id\n"
+        val l = RemoteScripts.parseLocated(out)
+        assertNull(l.aa)
+        assertEquals("/net/hu-omap/fs/sda0/opt/hmi/ID5/data/ro/Plugins/NbtAad", l.plugin)
+        assertEquals("/net/hu-omap/var/opt/nbtapp/apps/$id", l.nbtApp)
+        assertEquals("/net/hu-omap/var/opt/nbtapp/data/$id", l.nbtData)
+        // a manual install still wins and has no NBTApps folders
+        val manual = RemoteScripts.parseLocated("P \nAA /opt/aa\nPL /opt/hmi/ID5/data/ro/Plugins/NbtAad\nP /net/hu-omap/fs/sda0\n")
+        assertEquals("/opt/aa", manual.aa)
+        assertNull(manual.nbtApp)
+        assertNull(manual.nbtData)
+        // the old pair is unchanged by the new lines
+        assertEquals(null to "/net/hu-omap/fs/sda0/opt/hmi/ID5/data/ro/Plugins/NbtAad", RemoteScripts.parseLocate(out))
+        // the locate script asks for the folders, and the status script reads the env file where NBTApps keeps it
+        assertTrue(RemoteScripts.locate().contains("/var/opt/nbtapp/apps/$id"))
+        assertTrue(RemoteScripts.locate().contains("/var/opt/nbtapp/data/$id"))
+        val st = RemoteScripts.status("/var/opt/nbtapp/apps/$id", null, withEnv = true, env = "/var/opt/nbtapp/data/$id")
+        assertTrue(st.contains("cat /var/opt/nbtapp/data/$id/nbt-aad.env"))
+        assertFalse(st.contains("@ENV@"))
+        assertTrue(RemoteScripts.status("/opt/aa", null, withEnv = true).contains("cat /opt/aa/nbt-aad.env"))
+        assertTrue(RemoteScripts.parseStatus("/a", null, "F nbt-aad x 5\n", nbtApps = true).nbtApps)
+        assertFalse(RemoteScripts.parseStatus("/a", null, "F nbt-aad x 5\n").nbtApps)
+    }
+
     // ---- the version from the daemon's RAM log ----
 
     @Test

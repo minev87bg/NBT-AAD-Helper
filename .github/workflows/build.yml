@@ -69,7 +69,7 @@ jobs:
 
       # The app asks GitHub for the latest release at start-up (UpdateLogic.LATEST_URL).
       - name: Publish release
-        if: github.ref_name == 'main' || github.ref_name == 'add-app-source'
+        if: github.ref_name == 'main'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

@@ -382,6 +382,16 @@ private fun UnitCard(inst: InstallController, onChange: () -> Unit) {
 private fun UnitBody(inst: InstallController, u: UnitStatus, onChange: () -> Unit) {
     val soft = MaterialTheme.colorScheme.onSurfaceVariant
 
+    if (u.nbtApps) {
+        Text(
+            "Android Auto here was installed with NBTApps. Update or remove it in NBTApps: installing from this app " +
+                "would add a second copy that NBTApps removes again. Settings, logs and this version check work as usual.",
+            fontSize = 12.sp,
+            color = Amber,
+            modifier = Modifier.padding(bottom = 8.dp),
+        )
+    }
+
     // ---- the installed version, and whether it is an official release ----
     // the version is the one inside the file when that was read, else the one the daemon logged at its last start
     Text(if (u.versionFromLog) "Version (from the daemon's last start)" else "Installed version", fontSize = 11.sp, color = soft)

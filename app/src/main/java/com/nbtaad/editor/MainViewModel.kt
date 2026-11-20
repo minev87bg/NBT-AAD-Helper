@@ -994,7 +994,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     }
                     is EnvRemote.ReadResult.NoFolder -> {
                         optError = true
-                        optFeedback = "Folder /opt/aa not found on the head unit. Is NBT-AAD installed?\n" +
+                        optFeedback = "The NBT-AAD folder (/opt/aa, or NBTApps' /var/opt/nbtapp) was not found on the head unit. Is NBT-AAD installed?\n" +
                             "What the SSH shell can see:\n" + res.detail
                     }
                 }
